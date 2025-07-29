@@ -1,173 +1,188 @@
-# Manager.py - LSDAI Download Manager
-# Handles file downloads with multiple fallback methods
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Manager.py - Enhanced Download Manager with Robust Error Handling
+LSDAI v2.0 Enhancement Suite - Core Download Management Module
+
+FIXED: Complete overhaul with proper timeout management, progress reporting,
+and Civitai-specific URL handling to prevent hanging and improve reliability.
+"""
 
 import os
-import re
-import subprocess
+import sys
+import json
+import time
 import requests
-import shutil
+import subprocess
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
-import time
-import json
+from typing import Optional, Callable, Dict, Any
+import threading
 
 # Get environment paths
 HOME = Path(os.environ.get('home_path', '/content'))
 SCR_PATH = Path(os.environ.get('scr_path', HOME / 'LSDAI'))
+VENV_PATH = Path(os.environ.get('venv_path', HOME / 'venv'))
 
-# Try to import enhanced modules
+# Try to import notification system
+NOTIFICATIONS_AVAILABLE = False
 try:
-    from modules.NotificationSystem import send_info, send_success, send_error
+    from NotificationSystem import send_notification
     NOTIFICATIONS_AVAILABLE = True
 except ImportError:
-    NOTIFICATIONS_AVAILABLE = False
+    pass
 
-def send_notification(title, message, type_="info"):
-    """Send notification if available"""
-    if NOTIFICATIONS_AVAILABLE:
-        if type_ == "success":
-            send_success(title, message)
-        elif type_ == "error":
-            send_error(title, message)
-        else:
-            send_info(title, message)
+# Progress callback type
+ProgressCallback = Optional[Callable[[int, int], None]]
 
-def get_download_directory(url, webui_type='automatic1111'):
-    """Determine the correct download directory based on file type and WebUI"""
+def get_filename_from_url(url: str) -> str:
+    """
+    Extract filename from URL with enhanced Civitai support
     
-    # Extract filename from URL
-    parsed_url = urlparse(url)
-    filename = os.path.basename(parsed_url.path).lower()
-    
-    # Base directories for different WebUI types
-    if webui_type == 'ComfyUI':
-        base_dirs = {
-            'models': HOME / 'ComfyUI' / 'models',
-            'checkpoints': HOME / 'ComfyUI' / 'models' / 'checkpoints',
-            'vae': HOME / 'ComfyUI' / 'models' / 'vae',
-            'lora': HOME / 'ComfyUI' / 'models' / 'loras',
-            'embeddings': HOME / 'ComfyUI' / 'models' / 'embeddings',
-            'controlnet': HOME / 'ComfyUI' / 'models' / 'controlnet'
-        }
-    else:  # automatic1111
-        base_dirs = {
-            'models': HOME / 'stable-diffusion-webui' / 'models' / 'Stable-diffusion',
-            'checkpoints': HOME / 'stable-diffusion-webui' / 'models' / 'Stable-diffusion',
-            'vae': HOME / 'stable-diffusion-webui' / 'models' / 'VAE',
-            'lora': HOME / 'stable-diffusion-webui' / 'models' / 'Lora',
-            'embeddings': HOME / 'stable-diffusion-webui' / 'embeddings',
-            'controlnet': HOME / 'stable-diffusion-webui' / 'models' / 'ControlNet'
-        }
-    
-    # Determine file type based on filename and URL patterns
-    if any(pattern in filename for pattern in ['.safetensors', '.ckpt', '.pt']):
-        if 'vae' in filename or 'vae' in url.lower():
-            return base_dirs['vae']
-        elif any(pattern in filename for pattern in ['lora', 'lyco']):
-            return base_dirs['lora']
-        elif 'controlnet' in url.lower() or 'control' in filename:
-            return base_dirs['controlnet']
-        elif any(pattern in filename for pattern in ['embedding', 'textual']):
-            return base_dirs['embeddings']
-        else:
-            return base_dirs['checkpoints']
-    elif filename.endswith('.png') or filename.endswith('.jpg'):
-        return base_dirs['embeddings']
-    else:
-        # Default to models directory
-        return base_dirs['models']
-
-def clean_filename(filename):
-    """Clean filename by removing problematic characters"""
-    # Remove or replace problematic characters
-    filename = re.sub(r'[<>:"/\\|?*]', '_', filename)
-    # Remove excessive whitespace
-    filename = re.sub(r'\s+', ' ', filename).strip()
-    # Limit length
-    if len(filename) > 200:
-        name, ext = os.path.splitext(filename)
-        filename = name[:200-len(ext)] + ext
-    return filename
-
-def get_filename_from_url(url):
-    """Extract and clean filename from URL"""
-    
-    try:
-        # Parse URL
-        parsed_url = urlparse(url)
+    Args:
+        url: Download URL
         
-        # Check if it's a CivitAI URL with special handling
-        if 'civitai.com' in url:
-            return get_civitai_filename(url)
+    Returns:
+        str: Extracted or generated filename
+    """
+    try:
+        # Handle Civitai API URLs
+        if 'civitai.com/api/download' in url:
+            # Try to get filename from Content-Disposition header
+            try:
+                response = requests.head(url, allow_redirects=True, timeout=10)
+                if 'content-disposition' in response.headers:
+                    content_disp = response.headers['content-disposition']
+                    if 'filename=' in content_disp:
+                        filename = content_disp.split('filename=')[1].strip('"')
+                        return filename
+            except:
+                pass
+            
+            # Fallback: generate filename from model ID
+            parsed = urlparse(url)
+            if '/models/' in parsed.path:
+                model_id = parsed.path.split('/models/')[1]
+                return f"civitai_model_{model_id}.safetensors"
+        
+        # Handle HuggingFace URLs
         elif 'huggingface.co' in url:
-            return get_huggingface_filename(url)
+            parsed = urlparse(url)
+            filename = parsed.path.split('/')[-1]
+            if filename and '.' in filename:
+                return filename
         
-        # Extract filename from path
-        filename = os.path.basename(parsed_url.path)
+        # Handle standard URLs
+        else:
+            parsed = urlparse(url)
+            filename = parsed.path.split('/')[-1]
+            if filename and '.' in filename:
+                return filename
         
-        # If no filename in path, try to extract from query parameters
-        if not filename or '.' not in filename:
-            query_params = parse_qs(parsed_url.query)
-            if 'filename' in query_params:
-                filename = query_params['filename'][0]
-        
-        # If still no filename, generate one
-        if not filename:
-            filename = f"downloaded_file_{int(time.time())}"
-        
-        return clean_filename(filename)
-        
-    except Exception as e:
-        print(f"Error extracting filename from URL: {e}")
-        return f"downloaded_file_{int(time.time())}"
-
-def get_civitai_filename(url):
-    """Get filename for CivitAI downloads"""
-    try:
-        # CivitAI URLs often need special handling
-        response = requests.head(url, allow_redirects=True, timeout=10)
-        
-        # Try to get filename from Content-Disposition header
-        if 'Content-Disposition' in response.headers:
-            content_disp = response.headers['Content-Disposition']
-            filename_match = re.search(r'filename[^;=\n]*=(([\'"]).*?\2|[^;\n]*)', content_disp)
-            if filename_match:
-                filename = filename_match.group(1).strip('"\'')
-                return clean_filename(filename)
-        
-        # Fallback to URL parsing
-        return clean_filename(os.path.basename(urlparse(url).path))
+        # Final fallback: generate timestamp-based filename
+        timestamp = int(time.time())
+        return f"download_{timestamp}.safetensors"
         
     except Exception as e:
-        print(f"Error getting CivitAI filename: {e}")
-        return f"civitai_model_{int(time.time())}.safetensors"
+        print(f"⚠️ Error extracting filename from URL: {e}")
+        timestamp = int(time.time())
+        return f"download_{timestamp}.safetensors"
 
-def get_huggingface_filename(url):
-    """Get filename for HuggingFace downloads"""
-    try:
-        # HuggingFace URLs have predictable structure
-        if '/resolve/' in url:
-            parts = url.split('/resolve/')[-1].split('/')
-            if len(parts) >= 2:
-                return clean_filename(parts[-1])
-        
-        return clean_filename(os.path.basename(urlparse(url).path))
-        
-    except Exception as e:
-        print(f"Error getting HuggingFace filename: {e}")
-        return f"huggingface_model_{int(time.time())}"
-
-def download_with_requests(url, filepath, progress_callback=None):
-    """Download file using requests with progress tracking"""
+def get_download_directory(url: str, webui_type: str = 'automatic1111') -> Path:
+    """
+    Determine appropriate download directory based on URL and WebUI type
     
+    Args:
+        url: Download URL
+        webui_type: WebUI type (automatic1111, ComfyUI, etc.)
+        
+    Returns:
+        Path: Download directory path
+    """
+    try:
+        # WebUI base paths
+        webui_paths = {
+            'automatic1111': HOME / 'stable-diffusion-webui',
+            'ComfyUI': HOME / 'ComfyUI',
+            'InvokeAI': HOME / 'InvokeAI'
+        }
+        
+        base_path = webui_paths.get(webui_type, HOME / 'stable-diffusion-webui')
+        
+        # Determine subdirectory based on URL patterns
+        url_lower = url.lower()
+        
+        if 'controlnet' in url_lower:
+            if webui_type == 'automatic1111':
+                return base_path / 'models' / 'ControlNet'
+            elif webui_type == 'ComfyUI':
+                return base_path / 'models' / 'controlnet'
+        elif 'vae' in url_lower or 'autoencoder' in url_lower:
+            if webui_type == 'automatic1111':
+                return base_path / 'models' / 'VAE'
+            elif webui_type == 'ComfyUI':
+                return base_path / 'models' / 'vae'
+        elif 'lora' in url_lower:
+            if webui_type == 'automatic1111':
+                return base_path / 'models' / 'Lora'
+            elif webui_type == 'ComfyUI':
+                return base_path / 'models' / 'loras'
+        elif 'embedding' in url_lower or 'textual' in url_lower:
+            if webui_type == 'automatic1111':
+                return base_path / 'embeddings'
+            elif webui_type == 'ComfyUI':
+                return base_path / 'models' / 'embeddings'
+        else:
+            # Default to main model directory
+            if webui_type == 'automatic1111':
+                return base_path / 'models' / 'Stable-diffusion'
+            elif webui_type == 'ComfyUI':
+                return base_path / 'models' / 'checkpoints'
+        
+        # Fallback
+        return base_path / 'models' / 'Stable-diffusion'
+        
+    except Exception as e:
+        print(f"⚠️ Error determining download directory: {e}")
+        return HOME / 'downloads'
+
+def download_with_requests(url: str, filepath: Path, progress_callback: ProgressCallback = None) -> bool:
+    """
+    Download file using requests with enhanced progress reporting and error handling
+    
+    Args:
+        url: Download URL
+        filepath: Target file path
+        progress_callback: Optional progress callback function
+        
+    Returns:
+        bool: True if download successful, False otherwise
+    """
     try:
         print(f"📥 Downloading with requests: {filepath.name}")
         
-        response = requests.get(url, stream=True, timeout=30)
+        # Configure request headers for better compatibility
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        
+        # Create session for better connection handling
+        session = requests.Session()
+        session.headers.update(headers)
+        
+        # Start download with streaming
+        response = session.get(url, stream=True, timeout=30, allow_redirects=True)
         response.raise_for_status()
         
+        # Get total file size
         total_size = int(response.headers.get('content-length', 0))
         downloaded_size = 0
+        
+        print(f"📊 File size: {format_file_size(total_size)}")
+        
+        # Download with progress tracking
+        start_time = time.time()
+        last_progress_time = start_time
         
         with open(filepath, 'wb') as f:
             for chunk in response.iter_content(chunk_size=8192):
@@ -175,49 +190,145 @@ def download_with_requests(url, filepath, progress_callback=None):
                     f.write(chunk)
                     downloaded_size += len(chunk)
                     
-                    if progress_callback and total_size > 0:
-                        progress = (downloaded_size / total_size) * 100
-                        progress_callback(progress)
+                    # Update progress every second
+                    current_time = time.time()
+                    if current_time - last_progress_time >= 1.0:
+                        if total_size > 0:
+                            percentage = (downloaded_size / total_size) * 100
+                            speed = downloaded_size / (current_time - start_time)
+                            print(f"📈 Progress: {percentage:.1f}% ({format_file_size(downloaded_size)}/{format_file_size(total_size)}) - Speed: {format_file_size(speed)}/s")
+                        else:
+                            print(f"📈 Downloaded: {format_file_size(downloaded_size)}")
+                        
+                        last_progress_time = current_time
+                        
+                        # Call progress callback if provided
+                        if progress_callback:
+                            progress_callback(downloaded_size, total_size)
+        
+        # Final progress report
+        elapsed_time = time.time() - start_time
+        if elapsed_time > 0:
+            avg_speed = downloaded_size / elapsed_time
+            print(f"✅ Download completed in {elapsed_time:.1f}s - Average speed: {format_file_size(avg_speed)}/s")
         
         return True
         
-    except Exception as e:
+    except requests.exceptions.Timeout:
+        print(f"⚠️ Download timeout after 30 seconds")
+        return False
+    except requests.exceptions.RequestException as e:
         print(f"⚠️ Requests download failed: {e}")
         return False
+    except Exception as e:
+        print(f"⚠️ Unexpected download error: {e}")
+        return False
 
-def download_with_wget(url, filepath):
-    """Download file using wget"""
+def download_with_wget(url: str, filepath: Path) -> bool:
+    """
+    Download file using wget with timeout and progress reporting
     
+    Args:
+        url: Download URL
+        filepath: Target file path
+        
+    Returns:
+        bool: True if download successful, False otherwise
+    """
     try:
         print(f"📥 Downloading with wget: {filepath.name}")
         
-        cmd = ['wget', '-O', str(filepath), url, '--no-check-certificate', '--progress=bar:force']
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
+        cmd = [
+            'wget',
+            '--timeout=30',
+            '--tries=3',
+            '--continue',
+            '--output-document', str(filepath),
+            '--progress=bar:force',
+            '--no-check-certificate',
+            url
+        ]
         
-        return result.returncode == 0
+        # Execute with reasonable timeout
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)  # 30 min max
         
+        if result.returncode == 0:
+            print(f"✅ Wget download successful")
+            return True
+        else:
+            print(f"⚠️ Wget failed with return code {result.returncode}")
+            if result.stderr:
+                print(f"   Error: {result.stderr}")
+            return False
+        
+    except subprocess.TimeoutExpired:
+        print(f"⚠️ Wget download timeout after 30 minutes")
+        return False
+    except FileNotFoundError:
+        print(f"⚠️ Wget not found - install wget to use this download method")
+        return False
     except Exception as e:
         print(f"⚠️ Wget download failed: {e}")
         return False
 
-def download_with_curl(url, filepath):
-    """Download file using curl"""
+def download_with_curl(url: str, filepath: Path) -> bool:
+    """
+    Download file using curl with timeout and progress reporting
     
+    Args:
+        url: Download URL
+        filepath: Target file path
+        
+    Returns:
+        bool: True if download successful, False otherwise
+    """
     try:
         print(f"📥 Downloading with curl: {filepath.name}")
         
-        cmd = ['curl', '-L', '-o', str(filepath), url, '--progress-bar']
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
+        cmd = [
+            'curl',
+            '--location',
+            '--output', str(filepath),
+            '--progress-bar',
+            '--max-time', '1800',  # 30 minutes
+            '--connect-timeout', '30',
+            '--retry', '3',
+            '--continue-at', '-',
+            url
+        ]
         
-        return result.returncode == 0
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
         
+        if result.returncode == 0:
+            print(f"✅ Curl download successful")
+            return True
+        else:
+            print(f"⚠️ Curl failed with return code {result.returncode}")
+            if result.stderr:
+                print(f"   Error: {result.stderr}")
+            return False
+        
+    except subprocess.TimeoutExpired:
+        print(f"⚠️ Curl download timeout after 30 minutes")
+        return False
+    except FileNotFoundError:
+        print(f"⚠️ Curl not found - install curl to use this download method")
+        return False
     except Exception as e:
         print(f"⚠️ Curl download failed: {e}")
         return False
 
-def download_with_aria2c(url, filepath):
-    """Download file using aria2c"""
+def download_with_aria2c(url: str, filepath: Path) -> bool:
+    """
+    Download file using aria2c with optimized settings
     
+    Args:
+        url: Download URL
+        filepath: Target file path
+        
+    Returns:
+        bool: True if download successful, False otherwise
+    """
     try:
         print(f"📥 Downloading with aria2c: {filepath.name}")
         
@@ -228,47 +339,97 @@ def download_with_aria2c(url, filepath):
             '--max-connection-per-server', '4',
             '--split', '4',
             '--continue', 'true',
+            '--timeout', '30',
+            '--max-overall-download-limit', '0',
+            '--file-allocation', 'none',
             url
         ]
         
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
+        # Execute with timeout
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
         
-        return result.returncode == 0
+        if result.returncode == 0:
+            print(f"✅ Aria2c download successful")
+            return True
+        else:
+            print(f"⚠️ Aria2c failed with return code {result.returncode}")
+            if result.stderr:
+                print(f"   Error: {result.stderr}")
+            return False
         
+    except subprocess.TimeoutExpired:
+        print(f"⚠️ Aria2c download timeout after 30 minutes")
+        return False
+    except FileNotFoundError:
+        print(f"⚠️ Aria2c not found - install aria2 to use this download method")
+        return False
     except Exception as e:
         print(f"⚠️ Aria2c download failed: {e}")
         return False
 
-def verify_download(filepath, min_size=1024):
-    """Verify that the downloaded file is valid"""
+def verify_download(filepath: Path, min_size: int = 1024) -> bool:
+    """
+    Verify that the downloaded file is valid
     
+    Args:
+        filepath: Path to downloaded file
+        min_size: Minimum expected file size in bytes
+        
+    Returns:
+        bool: True if file is valid, False otherwise
+    """
     try:
         if not filepath.exists():
+            print(f"⚠️ Downloaded file does not exist: {filepath}")
             return False
         
         # Check file size
         file_size = filepath.stat().st_size
         if file_size < min_size:
-            print(f"⚠️ Downloaded file too small: {file_size} bytes")
+            print(f"⚠️ Downloaded file too small: {file_size} bytes (minimum: {min_size})")
             return False
         
-        # Check if file is HTML (error page)
-        if filepath.suffix.lower() in ['.safetensors', '.ckpt', '.pt']:
-            with open(filepath, 'rb') as f:
-                header = f.read(512)
-                if b'<html' in header.lower() or b'<body' in header.lower():
-                    print(f"⚠️ Downloaded file appears to be HTML (error page)")
-                    return False
+        # Check for HTML error pages in model files
+        if filepath.suffix.lower() in ['.safetensors', '.ckpt', '.pt', '.bin']:
+            try:
+                with open(filepath, 'rb') as f:
+                    header = f.read(1024)
+                    if b'<html' in header.lower() or b'<body' in header.lower():
+                        print(f"⚠️ Downloaded file appears to be HTML error page")
+                        return False
+            except:
+                pass  # If we can't read the file, assume it's binary and valid
         
+        print(f"✅ File verification passed: {format_file_size(file_size)}")
         return True
         
     except Exception as e:
         print(f"⚠️ Error verifying download: {e}")
         return False
 
-def m_download(url, log=False, unzip=False, webui_type='automatic1111', progress_callback=None):
+def format_file_size(size_bytes: int) -> str:
     """
-    Main download function with multiple fallback methods
+    Format file size in human-readable format
+    
+    Args:
+        size_bytes: Size in bytes
+        
+    Returns:
+        str: Formatted size string
+    """
+    if size_bytes == 0:
+        return "0 B"
+    
+    size_names = ["B", "KB", "MB", "GB", "TB"]
+    import math
+    i = int(math.floor(math.log(size_bytes, 1024)))
+    p = math.pow(1024, i)
+    s = round(size_bytes / p, 2)
+    return f"{s} {size_names[i]}"
+
+def m_download(url: str, log: bool = False, unzip: bool = False, webui_type: str = 'automatic1111', progress_callback: ProgressCallback = None) -> bool:
+    """
+    Main download function with multiple fallback methods and enhanced error handling
     
     Args:
         url: URL to download
@@ -280,7 +441,6 @@ def m_download(url, log=False, unzip=False, webui_type='automatic1111', progress
     Returns:
         bool: True if download successful, False otherwise
     """
-    
     if not url or not url.strip():
         print("⚠️ Empty URL provided")
         return False
@@ -298,20 +458,20 @@ def m_download(url, log=False, unzip=False, webui_type='automatic1111', progress
         
         filepath = download_dir / filename
         
-        # Check if file already exists
+        # Check if file already exists and is valid
         if filepath.exists() and verify_download(filepath):
-            print(f"✅ File already exists: {filepath}")
+            print(f"✅ File already exists and is valid: {filepath}")
             if NOTIFICATIONS_AVAILABLE:
                 send_notification("Download", f"File already exists: {filename}", "info")
             return True
         
         print(f"📁 Download directory: {download_dir}")
-        print(f"📄 Filename: {filename}")
+        print(f"📄 Target filename: {filename}")
         
         # Try different download methods in order of preference
         download_methods = [
-            ('aria2c', lambda: download_with_aria2c(url, filepath)),
             ('requests', lambda: download_with_requests(url, filepath, progress_callback)),
+            ('aria2c', lambda: download_with_aria2c(url, filepath)),
             ('wget', lambda: download_with_wget(url, filepath)),
             ('curl', lambda: download_with_curl(url, filepath))
         ]
@@ -359,9 +519,9 @@ def m_download(url, log=False, unzip=False, webui_type='automatic1111', progress
         print(f"❌ Download error: {e}")
         return False
 
-def m_clone(input_source, recursive=True, depth=1, log=False):
+def m_clone(input_source: str, recursive: bool = True, depth: int = 1, log: bool = False) -> bool:
     """
-    Clone a git repository
+    Clone a git repository with enhanced error handling
     
     Args:
         input_source: Git repository URL
@@ -372,7 +532,6 @@ def m_clone(input_source, recursive=True, depth=1, log=False):
     Returns:
         bool: True if clone successful, False otherwise
     """
-    
     if not input_source or not input_source.strip():
         print("⚠️ Empty repository URL provided")
         return False
@@ -383,7 +542,7 @@ def m_clone(input_source, recursive=True, depth=1, log=False):
         # Extract repository name
         repo_name = os.path.basename(url).replace('.git', '')
         
-        # Determine clone directory (extensions for WebUI)
+        # Determine clone directory
         clone_dir = HOME / 'stable-diffusion-webui' / 'extensions' / repo_name
         
         # Check if already exists
@@ -391,51 +550,51 @@ def m_clone(input_source, recursive=True, depth=1, log=False):
             print(f"✅ Repository already exists: {clone_dir}")
             return True
         
+        print(f"📁 Clone directory: {clone_dir}")
+        
         # Ensure parent directory exists
         clone_dir.parent.mkdir(parents=True, exist_ok=True)
-        
-        print(f"📥 Cloning repository: {url}")
-        print(f"📁 Destination: {clone_dir}")
         
         # Build git clone command
         cmd = ['git', 'clone']
         
-        if depth and depth > 0:
+        if depth > 0:
             cmd.extend(['--depth', str(depth)])
         
-        if recursive:
-            cmd.append('--recursive')
+        if not recursive:
+            cmd.append('--no-recurse-submodules')
         
         cmd.extend([url, str(clone_dir)])
         
-        # Execute git clone
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        print(f"🔧 Cloning: {' '.join(cmd)}")
+        
+        # Execute clone with timeout
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
         
         if result.returncode == 0:
-            print(f"✅ Repository cloned successfully: {repo_name}")
+            print(f"✅ Clone successful: {repo_name}")
             
             if log:
                 log_clone(url, str(clone_dir), True)
             
-            if NOTIFICATIONS_AVAILABLE:
-                send_notification("Clone Complete", f"Repository cloned: {repo_name}", "success")
-            
             return True
         else:
-            print(f"❌ Git clone failed: {result.stderr}")
+            print(f"❌ Clone failed: {result.stderr}")
             
             if log:
                 log_clone(url, str(clone_dir), False)
             
             return False
-            
+        
+    except subprocess.TimeoutExpired:
+        print(f"❌ Clone timeout after 5 minutes")
+        return False
     except Exception as e:
         print(f"❌ Clone error: {e}")
         return False
 
-def log_download(url, filepath, success):
-    """Log download operation"""
-    
+def log_download(url: str, filepath: str, success: bool):
+    """Log download operation to JSON file"""
     try:
         log_dir = SCR_PATH / 'logs'
         log_dir.mkdir(exist_ok=True)
@@ -471,9 +630,8 @@ def log_download(url, filepath, success):
     except Exception as e:
         print(f"Warning: Could not log download: {e}")
 
-def log_clone(url, clone_dir, success):
-    """Log clone operation"""
-    
+def log_clone(url: str, clone_dir: str, success: bool):
+    """Log clone operation to JSON file"""
     try:
         log_dir = SCR_PATH / 'logs'
         log_dir.mkdir(exist_ok=True)
@@ -509,9 +667,8 @@ def log_clone(url, clone_dir, success):
     except Exception as e:
         print(f"Warning: Could not log clone: {e}")
 
-def get_download_stats():
-    """Get download statistics"""
-    
+def get_download_stats() -> Dict[str, Any]:
+    """Get download statistics from log file"""
     try:
         log_file = SCR_PATH / 'logs' / 'downloads.json'
         
