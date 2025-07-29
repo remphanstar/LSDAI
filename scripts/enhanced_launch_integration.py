@@ -1,24 +1,55 @@
-# ~ enhanced_widgets_integration.py | Amalgamated Script ~
-# This script combines the robust loader with the main UI builder to create a single,
-# self-contained, and reliable widget interface for the LSDAI notebook.
+# ~ enhanced_widgets_en.py | by ANXETY - Refactored for Tabbed UI & Enhanced UX ~
 
-from IPython.display import display, HTML, Javascript
+from modules.widget_factory import WidgetFactory
+from modules.webui_utils import update_current_webui
+from modules import json_utils as js
+
+from IPython.display import display, Javascript, HTML
 import ipywidgets as widgets
 from pathlib import Path
 import json
 import os
 import sys
 
-# --- Global Path Variables ---
-# These will be populated by the main() function before widgets are built.
-SCRIPTS = None
-SCR_PATH = None
-SETTINGS_PATH = None
-CSS = None
-JS = None
-IN_COLAB = False
+# --- ROBUST PATH RESOLUTION ---
+def find_script_path():
+    """Find the absolute path to the 'scripts' directory using multiple methods."""
+    try: return Path(__file__).parent.resolve()
+    except NameError: pass
+    env_path = os.environ.get('scr_path')
+    if env_path:
+        scripts_dir = Path(env_path) / 'scripts'
+        if scripts_dir.exists() and (scripts_dir / '_models_data.py').exists(): return scripts_dir
+    cwd = Path.cwd()
+    if (cwd / 'scripts' / '_models_data.py').exists(): return cwd / 'scripts'
+    if cwd.name == 'scripts' and (cwd / '_models_data.py').exists(): return cwd
+    hardcoded_path = Path('/content/LSDAI/scripts')
+    if hardcoded_path.exists(): return hardcoded_path
+    raise FileNotFoundError("Could not determine the script path. Please ensure you are running from the LSDAI directory.")
 
-# --- Main UI Builder Class ---
+try:
+    SCRIPTS = find_script_path()
+    SCR_PATH = SCRIPTS.parent
+    SETTINGS_PATH = SCR_PATH / 'settings.json'
+    CSS = SCR_PATH / 'CSS'
+    JS = SCR_PATH / 'JS'
+except FileNotFoundError as e:
+    print(f"FATAL ERROR: {e}")
+    sys.exit(1)
+# --- END OF FIX ---
+
+# Conditional imports for platform-specific features
+try:
+    from google.colab import output, drive
+    IN_COLAB = True
+except ImportError:
+    IN_COLAB = False
+    class DummyOutput:
+        @staticmethod
+        def register_callback(name, func): pass
+    output = DummyOutput()
+
+# --- WIDGET MANAGER ---
 class WidgetManager:
     """Manages the creation, layout, and logic of the UI widgets."""
     
@@ -91,17 +122,17 @@ class WidgetManager:
     def build_ui(self):
         """Constructs and returns the entire widget UI."""
         
-        # --- HEADER CONTROLS ---
+        # --- HEADER CONTROLS (Single Line Layout using ToggleButtons) ---
         self.widgets['latest_webui'] = widgets.ToggleButton(value=True, description='Update WebUI', button_style='')
         self.widgets['latest_extensions'] = widgets.ToggleButton(value=True, description='Update Extensions', button_style='')
         self.widgets['inpainting_model'] = widgets.ToggleButton(value=False, description='Inpainting', button_style='')
         self.widgets['XL_models'] = widgets.ToggleButton(value=False, description='SDXL', button_style='')
+        self.widgets['detailed_download'] = widgets.ToggleButton(value=False, description='Detailed Output', button_style='')
         
         left_toggles = self.factory.create_hbox([self.widgets['latest_webui'], self.widgets['latest_extensions']], class_names=['header-group'])
         right_toggles = self.factory.create_hbox([self.widgets['inpainting_model'], self.widgets['XL_models']], class_names=['header-group'])
         
         self.widgets['change_webui'] = self.factory.create_dropdown(list(self.WEBUI_SELECTION.keys()), 'WebUI:', 'A1111')
-        self.widgets['detailed_download'] = widgets.ToggleButton(value=False, description='Detailed Output', button_style='')
         
         header_controls = self.factory.create_hbox([
             left_toggles,
@@ -126,6 +157,7 @@ class WidgetManager:
         tab_widget.add_class('selection-tabs')
         
         # --- ACCORDION FOR OTHER SETTINGS ---
+        # 1. Additional Configuration (Now includes API Tokens)
         self.widgets['check_custom_nodes_deps'] = self.factory.create_checkbox('Check ComfyUI Dependencies', True, layout={'display': 'none'})
         self.widgets['commit_hash'] = self.factory.create_text('Commit Hash:', '', 'Optional: Use a specific commit')
         self.widgets['commandline_arguments'] = self.factory.create_text('Arguments:', self.WEBUI_SELECTION['A1111'])
@@ -144,6 +176,7 @@ class WidgetManager:
             civitai_box, hf_box, zrok_box, ngrok_box
         ])
 
+        # 2. Custom Download
         self.widgets['empowerment'] = self.factory.create_checkbox('Empowerment Mode', False)
         self.widgets['empowerment_output'] = self.factory.create_textarea('', '', 'Use special tags like $ckpt, $lora, etc.')
         self.widgets['Model_url'] = self.factory.create_text('Model URL:')
@@ -168,26 +201,32 @@ class WidgetManager:
         accordion.selected_index = None
         accordion.add_class('trimmed-box')
 
+        # --- SAVE BUTTON ---
         save_button = self.factory.create_button('Save Settings', class_names=['button', 'button_save'])
         save_button.on_click(self.save_data)
 
+        # --- SIDEBAR FOR G-DRIVE, IMPORT/EXPORT ---
         BTN_STYLE = {'width': '48px', 'height': '48px'}
         TOOLTIPS = ("Disconnect Google Drive", "Connect Google Drive")
-        GD_status = js.read(SETTINGS_PATH, 'mountGDrive', False) if SETTINGS_PATH else False
+        GD_status = js.read(SETTINGS_PATH, 'mountGDrive', False)
         self.gdrive_button = self.factory.create_button('📁', layout=BTN_STYLE, class_names=['side-button'])
         self.gdrive_button.tooltip = TOOLTIPS[not GD_status]
+        
         self.export_button = self.factory.create_button('📤', layout=BTN_STYLE, class_names=['side-button'])
         self.export_button.tooltip = "Export settings to JSON"
+        
         self.import_button = self.factory.create_button('📥', layout=BTN_STYLE, class_names=['side-button'])
         self.import_button.tooltip = "Import settings from JSON"
+
         self.notification_popup = self.factory.create_html('', class_names=['notification-popup', 'hidden'])
+        
         sidebar = self.factory.create_vbox([self.gdrive_button, self.export_button, self.import_button, self.notification_popup], class_names=['sidebar'])
         if not IN_COLAB:
             sidebar.layout.display = 'none'
 
+        # --- FINAL LAYOUT ---
         main_content = self.factory.create_vbox([header_controls, tab_widget, accordion, save_button], class_names=['main-content'])
-        self.main_container = self.factory.create_hbox([main_content, sidebar], class_names=['main-ui-container'])
-        return self.main_container
+        return self.factory.create_hbox([main_content, sidebar], class_names=['main-ui-container'])
 
     def setup_callbacks(self):
         """Connects widget events to their handler functions."""
@@ -205,13 +244,16 @@ class WidgetManager:
         self.update_empowerment({'new': self.widgets['empowerment'].value}, None)
         self.update_change_webui({'new': self.widgets['change_webui'].value}, None)
 
+    # --- CALLBACK FUNCTIONS ---
     def update_xl_options(self, change, widget):
         is_xl = change['new']
         data_file = SCRIPTS / ('_xl_models_data.py' if is_xl else '_models_data.py')
+        
         self.update_selection_list('model', self.read_model_data(data_file, 'model'))
         self.update_selection_list('vae', self.read_model_data(data_file, 'vae'))
         self.update_selection_list('lora', self.read_model_data(data_file, 'lora'))
         self.update_selection_list('cnet', self.read_model_data(data_file, 'cnet'))
+
         self.widgets['inpainting_model'].value = False
         self.widgets['inpainting_model'].disabled = is_xl
         self.filter_inpainting_models({'new': False}, None)
@@ -232,11 +274,18 @@ class WidgetManager:
     def filter_inpainting_models(self, change, widget):
         is_inpainting = change.get('new', False)
         if self.widgets['XL_models'].value: return
+
         data_file = SCRIPTS / '_models_data.py'
         full_model_dict = self.read_model_data(data_file, 'model')
-        options = {name: data for name, data in full_model_dict.items() if data.get('inpainting')} if is_inpainting else {name: data for name, data in full_model_dict.items() if not data.get('inpainting')}
+
+        if is_inpainting:
+            options = {name: data for name, data in full_model_dict.items() if data.get('inpainting')}
+        else:
+            options = {name: data for name, data in full_model_dict.items() if not data.get('inpainting')}
+        
         self.update_selection_list('model', options)
 
+    # --- DATA & SIDEBAR FUNCTIONS ---
     def handle_gdrive_toggle(self, btn):
         btn.toggle = not getattr(btn, 'toggle', False)
         btn.tooltip = ("Disconnect Google Drive", "Connect Google Drive")[not btn.toggle]
@@ -260,7 +309,8 @@ class WidgetManager:
 
     def apply_imported_settings(self, data):
         try:
-            if 'widgets' in data: self.load_settings_data(data['widgets'])
+            if 'widgets' in data:
+                self.load_settings_data(data['widgets'])
             if 'mountGDrive' in data:
                 self.gdrive_button.toggle = data['mountGDrive']
                 self.gdrive_button.remove_class('active') if not data['mountGDrive'] else self.gdrive_button.add_class('active')
@@ -269,11 +319,13 @@ class WidgetManager:
             self.show_notification(f"Import failed: {e}", "error")
 
     def get_selected_toggles(self, data_type):
+        """Helper to get the names of selected toggle buttons for a given type."""
         if data_type in self.widgets and isinstance(self.widgets[data_type], list):
             return [btn.description for btn in self.widgets[data_type] if btn.value]
         return []
 
     def save_settings_to_dict(self):
+        """Gathers current widget values into a dictionary for saving/exporting."""
         widgets_values = {}
         for key in self.settings_keys:
             if key in ['model', 'vae', 'lora', 'controlnet']:
@@ -286,6 +338,7 @@ class WidgetManager:
         return widgets_values
 
     def save_settings(self):
+        """Saves the current widget states to the settings.json file."""
         widgets_values = self.save_settings_to_dict()
         js.save(SETTINGS_PATH, 'WIDGETS', widgets_values)
         js.save(SETTINGS_PATH, 'mountGDrive', getattr(self.gdrive_button, 'toggle', False))
@@ -295,7 +348,8 @@ class WidgetManager:
         for key in self.settings_keys:
             if key in widget_data and key in self.widgets:
                 try:
-                    if key in ['civitai_token', 'huggingface_token', 'zrok_token', 'ngrok_token'] and self.widgets[key].disabled: continue
+                    if key in ['civitai_token', 'huggingface_token', 'zrok_token', 'ngrok_token'] and self.widgets[key].disabled:
+                        continue
                     if key in ['model', 'vae', 'lora', 'controlnet']:
                         selected_names = widget_data.get(key, [])
                         for btn in self.widgets[key]:
@@ -318,26 +372,10 @@ class WidgetManager:
     def save_data(self, button):
         self.save_settings()
         self.show_notification("Settings Saved!", "success")
-        self.factory.close(self.main_container, class_names=['hide'], delay=0.5)
+        self.factory.close(main_container, class_names=['hide'], delay=0.5)
 
-# --- Loader Functions ---
-def show_error_message(error_details):
-    """Display a styled error message in the notebook"""
-    display(HTML(f"""
-    <div style="border: 2px solid #ef4444; background-color: #fee2e2; padding: 1rem; border-radius: 0.5rem; color: #b91c1c; margin: 10px 0;">
-        <h3 style="margin-top: 0;">⚠️ Enhanced Widgets Loading Error</h3>
-        <p>The enhanced UI script failed to load. Falling back to the original, stable widget interface.</p>
-        <details style="margin-top: 10px;">
-            <summary><b>Error Details (click to expand)</b></summary>
-            <pre style="white-space: pre-wrap; word-wrap: break-word; background: #fecaca; padding: 0.5rem; border-radius: 0.25rem; margin-top: 5px; font-size: 12px;">{error_details}</pre>
-        </details>
-    </div>
-    """))
-
-def load_widgets():
-    """Loads and displays the widget UI."""
-    global main_container
-    
+# --- EXECUTION ---
+if __name__ == "__main__":
     WidgetFactory().load_css(CSS / 'enhanced-widgets.css')
     if IN_COLAB:
         WidgetFactory().load_js(JS / 'main-widgets.js')
@@ -348,54 +386,3 @@ def load_widgets():
     
     manager.load_settings()
     manager.setup_callbacks()
-    return True
-
-def main():
-    """Main widget loading function"""
-    global SCRIPTS, SCR_PATH, SETTINGS_PATH, CSS, JS, IN_COLAB, main_container
-    
-    print("🎯 LSDAI Widget Interface Loader")
-    print("=" * 40)
-    
-    try:
-        SCRIPTS = find_script_path()
-        SCR_PATH = SCRIPTS.parent
-        SETTINGS_PATH = SCR_PATH / 'settings.json'
-        CSS = SCR_PATH / 'CSS'
-        JS = SCR_PATH / 'JS'
-        IN_COLAB = 'google.colab' in sys.modules
-        
-        modules_path = SCR_PATH / 'modules'
-        if modules_path.exists() and str(modules_path) not in sys.path:
-            sys.path.insert(0, str(modules_path))
-            print(f"🐍 Added {modules_path} to Python path")
-        
-        from modules.widget_factory import WidgetFactory
-        from modules.webui_utils import update_current_webui
-        from modules import json_utils as js
-
-    except Exception as e:
-        show_error_message(f"Initialization failed: {e}")
-        return
-
-    try:
-        print("✅ Attempting to load Enhanced Widget UI...")
-        if not load_widgets():
-             raise RuntimeError("load_widgets returned False")
-        print("✅ Enhanced Widget UI loaded successfully.")
-    except Exception as e:
-        show_error_message(e)
-        print("📦 Falling back to Original Widget UI...")
-        try:
-            original_script = SCRIPTS / 'widgets_en.py'
-            if original_script.exists():
-                with open(original_script, 'r', encoding='utf-8') as f:
-                    exec(f.read(), globals())
-            else:
-                print("❌ Original widget script not found. Cannot fall back.")
-        except Exception as final_e:
-            show_error_message(f"Fallback also failed: {final_e}")
-
-# --- SCRIPT EXECUTION ---
-if __name__ == "__main__" or "run_path" in globals():
-    main()
