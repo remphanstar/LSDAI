@@ -165,7 +165,11 @@ class WidgetManager:
         self.widgets['commit_hash'] = self.factory.create_text(description='Commit Hash:', placeholder='Optional: Use a specific commit')
         self.widgets['commandline_arguments'] = self.factory.create_text(description='Arguments:', value=self.WEBUI_SELECTION['A1111'])
         accent_colors = ['anxety', 'blue', 'green', 'peach', 'pink', 'red', 'yellow']
-        self.widgets['theme_accent'] = self.factory.create_dropdown(options=accent_colors, description='Theme Accent:', value='anxety')
+        self.widgets['theme_accent'] = self.factory.create_dropdown(
+            options=accent_colors, 
+            description='Theme Accent:', 
+            value='anxety'
+        )
         
         civitai_box, self.widgets['civitai_token'] = self.create_api_token_box('CivitAI Token:', 'Paste token here', 'https://civitai.com/user/account', 'CIVITAI_API_TOKEN')
         hf_box, self.widgets['huggingface_token'] = self.create_api_token_box('HuggingFace Token:', 'Paste token here', 'https://huggingface.co/settings/tokens', 'HUGGINGFACE_API_TOKEN')
@@ -304,7 +308,6 @@ class WidgetManager:
 
     def save_data(self, button):
         self.save_settings()
-        # Simple feedback without complex JS
         button.description = "Settings Saved!"
         button.button_style = 'success'
         import time
