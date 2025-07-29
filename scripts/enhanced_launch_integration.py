@@ -132,7 +132,12 @@ class WidgetManager:
         left_toggles = self.factory.create_hbox([self.widgets['latest_webui'], self.widgets['latest_extensions']], class_names=['header-group'])
         right_toggles = self.factory.create_hbox([self.widgets['inpainting_model'], self.widgets['XL_models']], class_names=['header-group'])
         
-        self.widgets['change_webui'] = self.factory.create_dropdown(list(self.WEBUI_SELECTION.keys()), 'WebUI:', 'A1111')
+        # FIXED: Corrected argument order for create_dropdown
+        self.widgets['change_webui'] = self.factory.create_dropdown(
+            options=list(self.WEBUI_SELECTION.keys()), 
+            value='A1111', 
+            description='WebUI:'
+        )
         
         header_controls = self.factory.create_hbox([
             left_toggles,
@@ -162,7 +167,7 @@ class WidgetManager:
         self.widgets['commit_hash'] = self.factory.create_text('Commit Hash:', '', 'Optional: Use a specific commit')
         self.widgets['commandline_arguments'] = self.factory.create_text('Arguments:', self.WEBUI_SELECTION['A1111'])
         accent_colors = ['anxety', 'blue', 'green', 'peach', 'pink', 'red', 'yellow']
-        self.widgets['theme_accent'] = self.factory.create_dropdown(accent_colors, 'Theme Accent:', 'anxety')
+        self.widgets['theme_accent'] = self.factory.create_dropdown(accent_colors, 'anxety', 'Theme Accent:')
         
         civitai_box, self.widgets['civitai_token'] = self.create_api_token_box('CivitAI Token:', 'Paste token here', 'https://civitai.com/user/account', 'CIVITAI_API_TOKEN')
         hf_box, self.widgets['huggingface_token'] = self.create_api_token_box('HuggingFace Token:', 'Paste token here', 'https://huggingface.co/settings/tokens', 'HUGGINGFACE_API_TOKEN')
@@ -178,7 +183,7 @@ class WidgetManager:
 
         # 2. Custom Download
         self.widgets['empowerment'] = self.factory.create_checkbox('Empowerment Mode', False)
-        self.widgets['empowerment_output'] = self.factory.create_textarea('', '', 'Use special tags like $ckpt, $lora, etc.')
+        self.widgets['empowerment_output'] = self.factory.create_textarea('', 'Use special tags like $ckpt, $lora, etc.')
         self.widgets['Model_url'] = self.factory.create_text('Model URL:')
         self.widgets['Vae_url'] = self.factory.create_text('Vae URL:')
         self.widgets['LoRA_url'] = self.factory.create_text('LoRA URL:')
