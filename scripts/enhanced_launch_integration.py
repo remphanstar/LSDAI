@@ -5,6 +5,9 @@ import subprocess
 import os
 import sys
 
+# Get settings path from environment or default
+SETTINGS_PATH = Path(os.environ.get('settings_path', '/content/LSDAI/settings.json'))
+
 # Import original launch functions
 try:
     from scripts.launch import *  # Your original launch functions
@@ -109,7 +112,7 @@ class IntegratedLauncher:
         try:
             # Get WebUI path and arguments
             webui_path = self._get_webui_path()
-            launch_args = js.read_key('commandline_arguments', '')
+            launch_args = js.read(SETTINGS_PATH, 'commandline_arguments', '')
             
             print(f"🚀 Launching WebUI from: {webui_path}")
             print(f"📝 Arguments: {launch_args}")
