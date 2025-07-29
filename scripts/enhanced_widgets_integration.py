@@ -2,7 +2,7 @@
 import json_utils as js
 from pathlib import Path
 import ipywidgets as widgets
-from IPython.display import display, HTML, Javascript
+from IPython.display import display, HTML, Javascript, clear_output
 import os
 
 # Get settings path from environment or default
@@ -45,43 +45,54 @@ class IntegratedWidgetSystem:
     def create_integrated_interface(self):
         """Create interface that combines original + enhanced features"""
         
+        # Clear any existing output first
+        clear_output(wait=True)
+        
         if ENHANCEMENTS_AVAILABLE:
             print("🚀 Loading Enhanced LSDAI Interface")
             
-            # Load enhanced CSS/JS
-            self._load_enhanced_styles()
-            
-            # Create enhanced interface
             try:
-                enhanced_interface = self.enhanced_manager.create_enhanced_interface()
+                # Load enhanced CSS/JS
+                self._load_enhanced_styles()
                 
-                # Add original LSDAI compatibility layer
-                compatibility_layer = self._create_compatibility_layer()
-                
-                # Combine interfaces
-                combined_interface = widgets.VBox([
-                    enhanced_interface,
-                    compatibility_layer
-                ])
-                
-                display(combined_interface)
+                # Try to create enhanced interface
+                if hasattr(self.enhanced_manager, 'create_enhanced_interface'):
+                    enhanced_interface = self.enhanced_manager.create_enhanced_interface()
+                    
+                    # Add original LSDAI compatibility layer
+                    compatibility_layer = self._create_compatibility_layer()
+                    
+                    # Combine interfaces
+                    combined_interface = widgets.VBox([
+                        enhanced_interface,
+                        compatibility_layer
+                    ])
+                    
+                    display(combined_interface)
+                    print("✅ Enhanced interface loaded successfully!")
+                    return
+                    
+                else:
+                    print("⚠️ Enhanced interface method not found")
+                    raise AttributeError("create_enhanced_interface method missing")
                 
             except Exception as e:
                 print(f"⚠️ Enhanced interface failed: {e}")
-                print("🔄 Falling back to original interface...")
-                self._create_original_interface()
-            
+                # Clear the failed output before showing fallback
+                clear_output(wait=True)
+                print("🔄 Loading clean LSDAI interface...")
+                self._create_comprehensive_interface()
         else:
-            print("📦 Loading Original LSDAI Interface")
-            self._create_original_interface()
+            print("📦 Loading LSDAI Interface")
+            self._create_comprehensive_interface()
             
     def _load_enhanced_styles(self):
         """Load enhanced CSS and JavaScript"""
         
         # Load enhanced CSS
         css_files = [
-            'CSS/enhanced-widgets.css',
-            'CSS/main-widgets.css'  # Your original CSS
+            'CSS/enhanced_widgets.css',
+            'CSS/main_widgets.css'  # Your original CSS
         ]
         
         for css_file in css_files:
@@ -92,8 +103,8 @@ class IntegratedWidgetSystem:
                     
         # Load enhanced JavaScript
         js_files = [
-            'JS/enhanced-widgets.js',
-            'JS/main-widgets.js'  # Your original JS
+            'JS/enhanced_widgets.js',
+            'JS/main_widgets.js'  # Your original JS
         ]
         
         for js_file in js_files:
@@ -157,22 +168,12 @@ class IntegratedWidgetSystem:
         return widgets.VBox(compatibility_widgets, 
                           layout=widgets.Layout(border='1px solid #ddd', padding='10px'))
         
-    def _create_original_interface(self):
-        """Fallback to original interface - SIMPLIFIED"""
-        print("📦 Loading LSDAI interface...")
-        
-        # Since the original widgets_en.py has complex global dependencies,
-        # we'll use our comprehensive basic fallback which provides all the same functionality
-        # but in a more reliable way
-        self._create_basic_fallback()
-            
-    def _create_basic_fallback(self):
-        """Create comprehensive basic fallback interface when everything else fails"""
-        print("🔧 Creating comprehensive basic interface...")
+    def _create_comprehensive_interface(self):
+        """Create comprehensive LSDAI interface - SINGLE CLEAN VERSION"""
         
         # Load CSS styling
         try:
-            css_files = ['CSS/main-widgets.css']
+            css_files = ['CSS/main_widgets.css']
             for css_file in css_files:
                 if Path(css_file).exists():
                     with open(css_file, 'r') as f:
@@ -185,42 +186,49 @@ class IntegratedWidgetSystem:
         all_widgets = []
         
         # Header
-        header = widgets.HTML('<h2 style="color: #4CAF50;">🎨 LSDAI Configuration Interface</h2>')
+        header = widgets.HTML('<h2 style="color: #4CAF50; text-align: center; margin-bottom: 20px;">🎨 LSDAI Configuration Interface</h2>')
         all_widgets.append(header)
         
         # Model Selection Section
-        model_section = widgets.HTML('<h3 style="color: #2196F3;">📁 Model Selection</h3>')
+        model_section = widgets.HTML('<h3 style="color: #2196F3; border-bottom: 2px solid #2196F3; padding-bottom: 5px;">📁 Model Selection</h3>')
         all_widgets.append(model_section)
         
-        # XL Models toggle
-        xl_toggle = widgets.ToggleButton(
-            value=js.read(SETTINGS_PATH, 'XL_models', False),
-            description='SDXL Models',
-            button_style='info',
-            layout=widgets.Layout(width='200px')
-        )
-        all_widgets.append(xl_toggle)
+        # Create model selection in a nice layout
+        model_row1 = widgets.HBox([
+            widgets.ToggleButton(
+                value=js.read(SETTINGS_PATH, 'XL_models', False),
+                description='SDXL Models',
+                button_style='info',
+                layout=widgets.Layout(width='200px')
+            ),
+            widgets.ToggleButton(
+                value=js.read(SETTINGS_PATH, 'latest_extensions', True),
+                description='Latest Extensions',
+                button_style='success',
+                layout=widgets.Layout(width='200px')
+            )
+        ], layout=widgets.Layout(margin='10px 0'))
+        all_widgets.append(model_row1)
         
-        # Model selection
+        # Model and VAE URLs
         model_text = widgets.Text(
             value=js.read(SETTINGS_PATH, 'model', ''),
             description='Model URL:',
             placeholder='https://civitai.com/api/download/models/...',
-            layout=widgets.Layout(width='100%')
+            layout=widgets.Layout(width='100%', margin='5px 0')
         )
         all_widgets.append(model_text)
         
-        # VAE selection  
         vae_text = widgets.Text(
             value=js.read(SETTINGS_PATH, 'vae', ''),
             description='VAE URL:',
             placeholder='https://huggingface.co/...',
-            layout=widgets.Layout(width='100%')
+            layout=widgets.Layout(width='100%', margin='5px 0')
         )
         all_widgets.append(vae_text)
         
         # WebUI Section
-        webui_section = widgets.HTML('<h3 style="color: #2196F3;">🚀 WebUI Configuration</h3>')
+        webui_section = widgets.HTML('<h3 style="color: #2196F3; border-bottom: 2px solid #2196F3; padding-bottom: 5px; margin-top: 30px;">🚀 WebUI Configuration</h3>')
         all_widgets.append(webui_section)
         
         # WebUI selection
@@ -228,21 +236,12 @@ class IntegratedWidgetSystem:
             options=['automatic1111', 'ComfyUI', 'InvokeAI', 'StableSwarmUI'],
             value=js.read(SETTINGS_PATH, 'change_webui', 'automatic1111'),
             description='WebUI:',
-            layout=widgets.Layout(width='300px')
+            layout=widgets.Layout(width='300px', margin='10px 0')
         )
         all_widgets.append(webui_dropdown)
         
-        # Extensions
-        extensions_toggle = widgets.ToggleButton(
-            value=js.read(SETTINGS_PATH, 'latest_extensions', True),
-            description='Latest Extensions',
-            button_style='success',
-            layout=widgets.Layout(width='200px')
-        )
-        all_widgets.append(extensions_toggle)
-        
         # Advanced Section
-        advanced_section = widgets.HTML('<h3 style="color: #2196F3;">⚙️ Advanced Settings</h3>')
+        advanced_section = widgets.HTML('<h3 style="color: #2196F3; border-bottom: 2px solid #2196F3; padding-bottom: 5px; margin-top: 30px;">⚙️ Advanced Settings</h3>')
         all_widgets.append(advanced_section)
         
         # Command line arguments
@@ -250,45 +249,49 @@ class IntegratedWidgetSystem:
             value=js.read(SETTINGS_PATH, 'commandline_arguments', ''),
             description='Launch Args:',
             placeholder='--xformers --api --listen --port 7860',
-            layout=widgets.Layout(width='100%', height='100px')
+            layout=widgets.Layout(width='100%', height='100px', margin='10px 0')
         )
         all_widgets.append(args_text)
         
         # API Tokens Section
-        tokens_section = widgets.HTML('<h3 style="color: #2196F3;">🔑 API Tokens (Optional)</h3>')
+        tokens_section = widgets.HTML('<h3 style="color: #2196F3; border-bottom: 2px solid #2196F3; padding-bottom: 5px; margin-top: 30px;">🔑 API Tokens (Optional)</h3>')
         all_widgets.append(tokens_section)
         
-        # Civitai token
-        civitai_token = widgets.Password(
-            value=js.read(SETTINGS_PATH, 'civitai_token', ''),
-            description='Civitai Token:',
-            placeholder='Your Civitai API token',
-            layout=widgets.Layout(width='100%')
-        )
-        all_widgets.append(civitai_token)
-        
-        # HuggingFace token
-        hf_token = widgets.Password(
-            value=js.read(SETTINGS_PATH, 'huggingface_token', ''),
-            description='HF Token:',
-            placeholder='Your HuggingFace token',
-            layout=widgets.Layout(width='100%')
-        )
-        all_widgets.append(hf_token)
+        # Token inputs in a nice layout
+        token_row = widgets.HBox([
+            widgets.Password(
+                value=js.read(SETTINGS_PATH, 'civitai_token', ''),
+                description='Civitai Token:',
+                placeholder='Your Civitai API token',
+                layout=widgets.Layout(width='50%')
+            ),
+            widgets.Password(
+                value=js.read(SETTINGS_PATH, 'huggingface_token', ''),
+                description='HF Token:',
+                placeholder='Your HuggingFace token', 
+                layout=widgets.Layout(width='50%')
+            )
+        ], layout=widgets.Layout(margin='10px 0'))
+        all_widgets.append(token_row)
         
         # Save button
         save_button = widgets.Button(
-            description='💾 Save Settings',
+            description='💾 Save All Settings',
             button_style='success',
-            layout=widgets.Layout(width='200px', height='40px')
+            layout=widgets.Layout(width='300px', height='50px', margin='20px auto')
         )
         all_widgets.append(save_button)
         
         # Status output
-        status_output = widgets.Output()
+        status_output = widgets.Output(layout=widgets.Layout(height='60px'))
         all_widgets.append(status_output)
         
-        # Set up change handlers
+        # Set up save functionality for all widgets
+        xl_toggle = model_row1.children[0]
+        extensions_toggle = model_row1.children[1]
+        civitai_token = token_row.children[0]
+        hf_token = token_row.children[1]
+        
         def save_all_settings(b=None):
             try:
                 js.save(SETTINGS_PATH, 'XL_models', xl_toggle.value)
@@ -302,7 +305,7 @@ class IntegratedWidgetSystem:
                 
                 with status_output:
                     status_output.clear_output()
-                    print("💾 All settings saved successfully!")
+                    print("✅ All settings saved successfully!")
                     
             except Exception as e:
                 with status_output:
@@ -314,8 +317,8 @@ class IntegratedWidgetSystem:
             save_all_settings()
             
         xl_toggle.observe(on_change, names='value')
-        webui_dropdown.observe(on_change, names='value')
         extensions_toggle.observe(on_change, names='value')
+        webui_dropdown.observe(on_change, names='value')
         
         # Manual save button
         save_button.on_click(save_all_settings)
@@ -328,14 +331,17 @@ class IntegratedWidgetSystem:
             all_widgets,
             layout=widgets.Layout(
                 width='100%',
-                padding='20px',
+                max_width='1000px',
+                padding='30px',
+                margin='0 auto',
                 border='2px solid #ddd',
-                border_radius='10px'
+                border_radius='15px',
+                background_color='#fafafa'
             )
         )
         
         display(interface)
-        print("✅ Basic interface created with full functionality!")
+        print("✅ LSDAI interface loaded with full functionality!")
 
 # Main integration function
 def create_integrated_widgets():
