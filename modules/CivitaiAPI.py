@@ -1,363 +1,419 @@
-# ~ CivitAi API Module (V2) - FIXED VERSION | by ANXETY ~
+# CivitaiAPI.py - CivitAI API Integration for LSDAI
+# Handles CivitAI model downloads and API interactions
 
-from urllib.parse import urlparse, parse_qs, urlencode
-from typing import Optional, Union, Tuple, Dict, Any, List
-from dataclasses import dataclass
-from pathlib import Path
-from PIL import Image
 import requests
 import json
+import time
 import os
-import re
-import io
+from pathlib import Path
+from urllib.parse import urlparse, parse_qs
+from typing import Dict, List, Optional, Union
 
+# Get environment paths
+HOME = Path(os.environ.get('home_path', '/content'))
+SCR_PATH = Path(os.environ.get('scr_path', HOME / 'LSDAI'))
 
-# === Logger Utility ===
-class APILogger:
-    """Colored logger for API events"""
-    def __init__(self, verbose: bool = True):
-        self.verbose = verbose
+# Try to import json_utils for token management
+try:
+    import json_utils as js
+    JSON_UTILS_AVAILABLE = True
+except ImportError:
+    JSON_UTILS_AVAILABLE = False
 
-    def log(self, msg: str, level: str = "info"):
-        if not self.verbose and level != "error":
-            return
-        colors = {"error": 31, "success": 32, "warning": 33, "info": 34}
-        print(f"\033[{colors[level]}m[API {level.title()}]:\033[0m {msg}")
-
-
-# === Model Data ===
-@dataclass
-class ModelData:
-    download_url: str
-    clean_url: str
-    model_name: str
-    model_type: str
-    version_id: str
-    model_id: str
-    image_url: Optional[str] = None
-    image_name: Optional[str] = None
-    early_access: bool = False
-    base_model: Optional[str] = None
-    trained_words: Optional[List[str]] = None
-    sha256: Optional[str] = None
-
-
-# === Main API ===
 class CivitAiAPI:
-    """
-    Usage Example:
-        api = CivitAiAPI(token=token)
-        result = api.validate_download(
-            url='https://civitai.com/models/...',
-            file_name='model.safetensors'
-        )
-
-        full_data = api.get_model_data(url='https://civitai.com/models/...')
-    """
-
-    BASE_URL = 'https://civitai.com/api/v1'
-    SUPPORTED_TYPES = {'Checkpoint', 'TextualInversion', 'LORA'}    # For Save Preview
-    IS_KAGGLE = os.getenv('KAGGLE_URL_BASE')
-
-    def __init__(self, token: Optional[str] = None, log: bool = True):
-        # FIXED: No hardcoded fake token, proper validation
-        env_token = os.getenv('CIVITAI_API_TOKEN')
-        self.token = self._validate_token(env_token or token)
-        self.logger = APILogger(verbose=log)
+    """CivitAI API client for model downloads and information retrieval"""
+    
+    def __init__(self, api_token: Optional[str] = None):
+        self.base_url = "https://civitai.com/api/v1"
+        self.api_token = api_token or self._get_token_from_settings()
+        self.session = requests.Session()
         
-        if not self.token:
-            self.logger.log("No valid CivitAI token provided. API functionality will be limited.", "warning")
-
-    def _validate_token(self, token: Optional[str]) -> Optional[str]:
-        """FIXED: Validate token format and functionality"""
-        if not token:
-            return None
-            
-        # Basic format validation for CivitAI tokens (32-char hex)
-        if not (len(token) == 32 and all(c in '0123456789abcdef' for c in token.lower())):
-            return None
-            
-        # Test token with a simple API call
+        # Set up session headers
+        if self.api_token:
+            self.session.headers.update({
+                'Authorization': f'Bearer {self.api_token}',
+                'User-Agent': 'LSDAI/2.0'
+            })
+        else:
+            self.session.headers.update({
+                'User-Agent': 'LSDAI/2.0'
+            })
+    
+    def _get_token_from_settings(self) -> Optional[str]:
+        """Get CivitAI token from settings"""
+        if JSON_UTILS_AVAILABLE:
+            return js.read_key('civitai_token', '')
+        return ''
+    
+    def set_token(self, token: str):
+        """Set CivitAI API token"""
+        self.api_token = token
+        if token:
+            self.session.headers.update({
+                'Authorization': f'Bearer {token}'
+            })
+        
+        # Save to settings if possible
+        if JSON_UTILS_AVAILABLE:
+            js.write_key('civitai_token', token)
+    
+    def test_connection(self) -> bool:
+        """Test connection to CivitAI API"""
         try:
-            headers = {'Authorization': f'Bearer {token}'}
-            response = requests.get(f"{self.BASE_URL}/models", headers=headers, timeout=10, params={'limit': 1})
-            if response.status_code == 401:
-                return None  # Invalid token
-            return token
-        except Exception:
-            return None  # Network error or invalid token
-
-    # === Core Helpers ===
-    def _build_url(self, endpoint: str) -> str:
-        """Construct full API URL for given endpoint"""
-        return f"{self.BASE_URL}/{endpoint}"
-
-    def _get(self, url: str) -> Optional[Dict]:
-        """Perform GET request and return JSON or None"""
-        if not self.token:
-            self.logger.log("No valid token available for API request", "error")
-            return None
-            
-        headers = {'Authorization': f'Bearer {self.token}'}
-        try:
-            res = requests.get(url, headers=headers, timeout=30)
-            res.raise_for_status()
-            return res.json()
-        except requests.Timeout:
-            self.logger.log(f"Timeout for {url}", "error")
-            return None
-        except requests.HTTPError as e:
-            if e.response.status_code == 401:
-                self.logger.log("API token is invalid or expired", "error")
-            elif e.response.status_code == 429:
-                self.logger.log("API rate limit exceeded", "error")
-            else:
-                self.logger.log(f"HTTP error {e.response.status_code} for {url}", "error")
-            return None
-        except requests.RequestException as e:
-            self.logger.log(f"Request failed for {url}: {e}", "error")
-            return None
-
-    def _extract_version_id(self, url: str) -> Optional[str]:
-        """Extract version ID from various CivitAI URL formats"""
-        if not url.startswith(('http://', 'https://')):
-            self.logger.log("Invalid URL format", "error")
-            return None
-
-        if 'modelVersionId=' in url:
-            return url.split('modelVersionId=')[1].split('&')[0]
-
-        if 'civitai.com/models/' in url:
-            model_id = url.split('/models/')[1].split('/')[0].split('?')[0]
-            if model_id.isdigit():
-                model_data = self._get(self._build_url(f"models/{model_id}"))
-                return model_data.get('modelVersions', [{}])[0].get('id') if model_data else None
-
-        if '/api/download/models/' in url:
-            return url.split('/api/download/models/')[1].split('?')[0]
-
-        self.logger.log(f"Unsupported URL format: {url}", "error")
-        return None
-
-    def _process_url(self, download_url: str) -> Tuple[str, str]:
-        """Sanitize and sign download URL"""
-        parsed = urlparse(download_url)
-        query = parse_qs(parsed.query)
-        query.pop('token', None)
-        clean_url = parsed._replace(query=urlencode(query, doseq=True)).geturl()
-        final_url = f"{clean_url}?token={self.token}" if self.token else clean_url
-        return clean_url, final_url
-
-    def _get_preview(self, images: List[Dict], name: str) -> Tuple[Optional[str], Optional[str]]:
-        """Extract a valid preview image URL and filename"""
-        for img in images:
-            url = img.get('url', '')
-            if self.IS_KAGGLE and img.get('nsfwLevel', 0) >= 4:
-                continue
-            if any(url.lower().endswith(ext) for ext in ['.gif', '.mp4', '.webm']):
-                continue
-            ext = url.split('.')[-1].split('?')[0]
-            return url, f"{Path(name).stem}.preview.{ext}"
-        return None, None
-
-    def _parse_model_name(self, data: Dict, filename: Optional[str]) -> Tuple[str, str]:
-        """Generate final model filename from metadata"""
-        name = data['files'][0]['name']
-        ext = name.split('.')[-1]
-        if filename and '.' not in filename:
-            filename += f".{ext}"
-        return data['model']['type'], filename or name
-
-    def _early_access_check(self, data: Dict) -> bool:
-        """Check if model is gated behind Early Access"""
-        ea = data.get('availability') == 'EarlyAccess' or data.get('earlyAccessEndsAt')
-        if ea:
-            model_id = data.get('modelId')
-            version_id = data.get('id')
-            self.logger.log(f"Requires Early Access: https://civitai.com/models/{model_id}?modelVersionId={version_id}", "warning")
-        return ea
-
-    # === sdAIgen ===
-    def validate_download(self, url: str, file_name: Optional[str] = None) -> Optional[ModelData]:
-        """FIXED: Better error handling and token validation"""
-        if not self.token:
-            self.logger.log("CivitAI token required for downloads", "error")
-            return None
-            
-        version_id = self._extract_version_id(url)
-        if not version_id:
-            return None
-
-        data = self._get(self._build_url(f"model-versions/{version_id}"))
-        if not data:
-            return None
-
-        if self._early_access_check(data):
-            return None
-
-        try:
-            model_type, name = self._parse_model_name(data, file_name)
-            clean_url, full_url = self._process_url(data['downloadUrl'])
-
-            preview_url, preview_name = (None, None)
-            if model_type in self.SUPPORTED_TYPES:
-                preview_url, preview_name = self._get_preview(data.get('images', []), name)
-
-            return ModelData(
-                download_url=full_url, # **FIX: Return the FULL URL with the token**
-                clean_url=clean_url,
-                model_name=name,
-                model_type=model_type,
-                version_id=data['id'],
-                model_id=data['modelId'],
-                early_access=False,
-                image_url=preview_url,
-                image_name=preview_name,
-                base_model=data.get("baseModel"),
-                trained_words=data.get("trainedWords"),
-                sha256=data.get("files", [{}])[0].get("hashes", {}).get("SHA256")
-            )
-        except (KeyError, IndexError, TypeError) as e:
-            self.logger.log(f"Error parsing model data: {e}", "error")
-            return None
-
-    # === General ===
-    def get_model_data(self, url: str) -> Optional[Dict[str, Any]]:
-        """Fetch full model version metadata from CivitAI by URL"""
-        if not self.token:
-            self.logger.log("CivitAI token required for API access", "error")
-            return None
-            
-        version_id = self._extract_version_id(url)
-        if not version_id:
-            self.logger.log(f"Cannot get model data — failed to extract version ID from URL: {url}", "error")
-            return None
-
-        data = self._get(self._build_url(f"model-versions/{version_id}"))
-        if not data:
-            self.logger.log(f"Failed to retrieve model version data for ID: {version_id}", "error")
-
-        return data
-
-    def get_model_versions(self, model_id: str) -> Optional[List[Dict]]:
-        """Get all available versions of a model by ID"""
-        if not self.token:
-            return None
-            
-        data = self._get(self._build_url(f"models/{model_id}"))
-        return data.get("modelVersions") if data else None
-
-    def find_by_sha256(self, sha256: str) -> Optional[Dict]:
-        """Find model version data by SHA256 hash"""
-        if not self.token:
-            return None
-            
-        return self._get(self._build_url(f"model-versions/by-hash/{sha256}"))
-
-    def download_preview_image(self, model_data: ModelData, save_path: Optional[Union[str, Path]] = None, resize: bool = False):
-        """
-        Download and save model preview image.
-
-        Args:
-            model_data: ModelData object with preview metadata
-            save_path: Directory path (str or Path) where image will be saved. Defaults to current directory.
-            resize: If True, resize image to 512px max (default: False)
-        """
-        if model_data is None:
-            self.logger.log("ModelData is None — skipping download_preview_image", "warning")
-            return
-
-        if not model_data.image_url:
-            self.logger.log("No preview image URL available", "warning")
-            return
-
-        save_dir = Path(save_path) if save_path else Path.cwd()
-        save_dir.mkdir(parents=True, exist_ok=True)
-        file_path = save_dir / model_data.image_name
-
-        if file_path.exists():
-            return
-
-        try:
-            res = requests.get(model_data.image_url, timeout=30)
-            res.raise_for_status()
-            img_data = self._resize_image(res.content) if resize else io.BytesIO(res.content)
-            file_path.write_bytes(img_data.read())
-            self.logger.log(f"Saved preview: {file_path}", "success")
+            response = self.session.get(f"{self.base_url}/models", timeout=10)
+            return response.status_code == 200
         except Exception as e:
-            self.logger.log(f"Failed to download preview: {e}", "error")
-
-    def _resize_image(self, raw: bytes, size: int = 512) -> io.BytesIO:
-        """Resize image to target size while preserving aspect ratio"""
+            print(f"Connection test failed: {e}")
+            return False
+    
+    def get_model_info(self, model_id: Union[int, str]) -> Optional[Dict]:
+        """Get detailed information about a model"""
         try:
-            img = Image.open(io.BytesIO(raw))
-            w, h = img.size
-            new_size = (size, int(h * size / w)) if w > h else (int(w * size / h), size)
-            img = img.resize(new_size, Image.Resampling.LANCZOS)
-            output = io.BytesIO()
-            img.save(output, format='PNG')
-            output.seek(0)
-            return output
-        except Exception as e:
-            self.logger.log(f"Resize failed: {e}", "warning")
-            return io.BytesIO(raw)
-
-    def save_model_info(self, model_data: ModelData, save_path: Optional[Union[str, Path]] = None):
-        """
-        Save model metadata to a JSON file.
-
-        Args:
-            model_data: ModelData object
-            save_path: Directory path (str or Path) to save metadata. Defaults to current directory.
-        """
-        if model_data is None:
-            self.logger.log("ModelData is None — skipping save_model_info", "warning")
-            return
-
-        save_dir = Path(save_path) if save_path else Path.cwd()
-        save_dir.mkdir(parents=True, exist_ok=True)
-        info_file = save_dir / f"{Path(model_data.model_name).stem}.json"
-
-        if info_file.exists():
-            return
-
-        base_mapping = {
-            'SD 1': 'SD1', 'SD 1.5': 'SD1', 'SD 2': 'SD2', 'SD 3': 'SD3',
-            'SDXL': 'SDXL', 'Pony': 'SDXL', 'Illustrious': 'SDXL',
-        }
-        info = {
-            "model_type": model_data.model_type,
-            "sd_version": next((v for k, v in base_mapping.items() if k in (model_data.base_model or '')), ''),
-            "modelId": model_data.model_id,
-            "modelVersionId": model_data.version_id,
-            "activation_text": ', '.join(model_data.trained_words or []),
-            "sha256": model_data.sha256
-        }
-        try:
-            info_file.write_text(json.dumps(info, indent=4))
-            self.logger.log(f"Saved model info: {info_file}", "success")
-        except Exception as e:
-            self.logger.log(f"Failed to save info: {e}", "error")
-
-    # FIXED: Add method to check token validity
-    def is_token_valid(self) -> bool:
-        """Check if the current token is valid"""
-        return self.token is not None
-
-    def get_token_info(self) -> Optional[Dict]:
-        """Get information about the current token (if valid)"""
-        if not self.token:
-            return None
+            response = self.session.get(f"{self.base_url}/models/{model_id}", timeout=30)
             
-        try:
-            # Use a simple API call to check token status
-            headers = {'Authorization': f'Bearer {self.token}'}
-            response = requests.get(f"{self.BASE_URL}/models", headers=headers, timeout=10, params={'limit': 1})
             if response.status_code == 200:
-                return {"valid": True, "status": "active"}
-            elif response.status_code == 401:
-                return {"valid": False, "status": "invalid"}
+                return response.json()
+            elif response.status_code == 404:
+                print(f"Model {model_id} not found")
+                return None
             else:
-                return {"valid": False, "status": f"error_{response.status_code}"}
+                print(f"Error getting model info: {response.status_code}")
+                return None
+                
         except Exception as e:
-            return {"valid": False, "status": f"network_error: {str(e)}"}
+            print(f"Error getting model info: {e}")
+            return None
+    
+    def get_model_versions(self, model_id: Union[int, str]) -> List[Dict]:
+        """Get all versions of a model"""
+        try:
+            response = self.session.get(f"{self.base_url}/models/{model_id}/versions", timeout=30)
+            
+            if response.status_code == 200:
+                return response.json().get('items', [])
+            else:
+                print(f"Error getting model versions: {response.status_code}")
+                return []
+                
+        except Exception as e:
+            print(f"Error getting model versions: {e}")
+            return []
+    
+    def search_models(self, query: str = "", limit: int = 20, page: int = 1, 
+                     model_type: str = "", sort: str = "Most Downloaded") -> Dict:
+        """Search for models on CivitAI"""
+        try:
+            params = {
+                'limit': limit,
+                'page': page
+            }
+            
+            if query:
+                params['query'] = query
+            if model_type:
+                params['types'] = model_type
+            if sort:
+                params['sort'] = sort
+            
+            response = self.session.get(f"{self.base_url}/models", params=params, timeout=30)
+            
+            if response.status_code == 200:
+                return response.json()
+            else:
+                print(f"Search failed: {response.status_code}")
+                return {'items': [], 'metadata': {}}
+                
+        except Exception as e:
+            print(f"Search error: {e}")
+            return {'items': [], 'metadata': {}}
+    
+    def get_popular_models(self, model_type: str = "", limit: int = 20) -> List[Dict]:
+        """Get popular models from CivitAI"""
+        result = self.search_models(
+            limit=limit,
+            model_type=model_type,
+            sort="Most Downloaded"
+        )
+        return result.get('items', [])
+    
+    def parse_civitai_url(self, url: str) -> Optional[Dict]:
+        """Parse CivitAI URL to extract model and version information"""
+        try:
+            parsed = urlparse(url)
+            
+            if 'civitai.com' not in parsed.netloc:
+                return None
+            
+            # Handle different URL formats
+            path_parts = parsed.path.strip('/').split('/')
+            
+            result = {
+                'model_id': None,
+                'version_id': None,
+                'is_direct_download': False
+            }
+            
+            # Direct download URL: /api/download/models/{versionId}
+            if 'api/download/models' in parsed.path:
+                if len(path_parts) >= 4:
+                    result['version_id'] = path_parts[3]
+                    result['is_direct_download'] = True
+            
+            # Model page URL: /models/{modelId}
+            elif 'models' in path_parts:
+                model_idx = path_parts.index('models')
+                if len(path_parts) > model_idx + 1:
+                    result['model_id'] = path_parts[model_idx + 1]
+            
+            # Check for version in query parameters
+            query_params = parse_qs(parsed.query)
+            if 'modelVersionId' in query_params:
+                result['version_id'] = query_params['modelVersionId'][0]
+            
+            return result
+            
+        except Exception as e:
+            print(f"Error parsing CivitAI URL: {e}")
+            return None
+    
+    def get_download_url(self, version_id: Union[int, str]) -> Optional[str]:
+        """Get direct download URL for a model version"""
+        try:
+            # First get version info to find the download URL
+            response = self.session.get(f"{self.base_url}/model-versions/{version_id}", timeout=30)
+            
+            if response.status_code == 200:
+                version_data = response.json()
+                files = version_data.get('files', [])
+                
+                # Find the primary model file
+                for file_info in files:
+                    if file_info.get('primary', False):
+                        download_url = file_info.get('downloadUrl')
+                        if download_url:
+                            return download_url
+                
+                # Fallback to first file if no primary file found
+                if files:
+                    return files[0].get('downloadUrl')
+            
+            # Fallback: construct direct download URL
+            return f"https://civitai.com/api/download/models/{version_id}"
+            
+        except Exception as e:
+            print(f"Error getting download URL: {e}")
+            return f"https://civitai.com/api/download/models/{version_id}"
+    
+    def get_model_filename(self, version_id: Union[int, str]) -> Optional[str]:
+        """Get the filename for a model version"""
+        try:
+            response = self.session.get(f"{self.base_url}/model-versions/{version_id}", timeout=30)
+            
+            if response.status_code == 200:
+                version_data = response.json()
+                files = version_data.get('files', [])
+                
+                # Find the primary model file
+                for file_info in files:
+                    if file_info.get('primary', False):
+                        return file_info.get('name')
+                
+                # Fallback to first file
+                if files:
+                    return files[0].get('name')
+            
+            return None
+            
+        except Exception as e:
+            print(f"Error getting filename: {e}")
+            return None
+    
+    def download_model(self, url: str, destination: Optional[Path] = None) -> bool:
+        """Download a model from CivitAI"""
+        try:
+            url_info = self.parse_civitai_url(url)
+            if not url_info:
+                print("Invalid CivitAI URL")
+                return False
+            
+            # Get download URL and filename
+            if url_info['is_direct_download']:
+                download_url = url
+                version_id = url_info['version_id']
+            else:
+                version_id = url_info['version_id']
+                if not version_id and url_info['model_id']:
+                    # Get latest version of the model
+                    versions = self.get_model_versions(url_info['model_id'])
+                    if versions:
+                        version_id = versions[0]['id']
+                
+                if not version_id:
+                    print("Could not determine version ID")
+                    return False
+                
+                download_url = self.get_download_url(version_id)
+            
+            if not download_url:
+                print("Could not get download URL")
+                return False
+            
+            # Get filename
+            filename = self.get_model_filename(version_id)
+            if not filename:
+                filename = f"civitai_model_{version_id}.safetensors"
+            
+            # Determine destination
+            if destination is None:
+                destination = HOME / 'stable-diffusion-webui' / 'models' / 'Stable-diffusion'
+            
+            destination.mkdir(parents=True, exist_ok=True)
+            filepath = destination / filename
+            
+            # Check if file already exists
+            if filepath.exists():
+                print(f"File already exists: {filename}")
+                return True
+            
+            print(f"Downloading: {filename}")
+            print(f"From: {download_url}")
+            
+            # Download with progress tracking
+            response = self.session.get(download_url, stream=True, timeout=30)
+            response.raise_for_status()
+            
+            total_size = int(response.headers.get('content-length', 0))
+            downloaded_size = 0
+            
+            with open(filepath, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+                        downloaded_size += len(chunk)
+                        
+                        if total_size > 0:
+                            progress = (downloaded_size / total_size) * 100
+                            print(f"\rProgress: {progress:.1f}%", end='', flush=True)
+            
+            print(f"\n✅ Downloaded: {filename}")
+            return True
+            
+        except Exception as e:
+            print(f"Download error: {e}")
+            return False
+    
+    def get_user_info(self) -> Optional[Dict]:
+        """Get information about the authenticated user"""
+        if not self.api_token:
+            print("API token required for user info")
+            return None
+        
+        try:
+            response = self.session.get(f"{self.base_url}/user", timeout=30)
+            
+            if response.status_code == 200:
+                return response.json()
+            elif response.status_code == 401:
+                print("Invalid API token")
+                return None
+            else:
+                print(f"Error getting user info: {response.status_code}")
+                return None
+                
+        except Exception as e:
+            print(f"Error getting user info: {e}")
+            return None
+    
+    def get_model_categories(self) -> List[str]:
+        """Get available model categories"""
+        return [
+            "Checkpoint",
+            "TextualInversion",
+            "Hypernetwork", 
+            "AestheticGradient",
+            "LORA",
+            "Controlnet",
+            "Poses"
+        ]
+    
+    def get_trending_models(self, period: str = "Week") -> List[Dict]:
+        """Get trending models for a specific time period"""
+        valid_periods = ["Day", "Week", "Month", "Year", "AllTime"]
+        if period not in valid_periods:
+            period = "Week"
+        
+        result = self.search_models(
+            limit=20,
+            sort=f"Most Downloaded ({period})"
+        )
+        return result.get('items', [])
+    
+    def format_model_info(self, model_data: Dict) -> str:
+        """Format model information for display"""
+        try:
+            name = model_data.get('name', 'Unknown')
+            creator = model_data.get('creator', {}).get('username', 'Unknown')
+            model_type = model_data.get('type', 'Unknown')
+            downloads = model_data.get('stats', {}).get('downloadCount', 0)
+            rating = model_data.get('stats', {}).get('rating', 0)
+            
+            return f"""
+📋 Model: {name}
+👤 Creator: {creator}
+🏷️ Type: {model_type}
+📥 Downloads: {downloads:,}
+⭐ Rating: {rating:.1f}/5
+            """.strip()
+            
+        except Exception as e:
+            return f"Error formatting model info: {e}"
+    
+    def search_and_display(self, query: str, limit: int = 10):
+        """Search for models and display formatted results"""
+        print(f"🔍 Searching CivitAI for: {query}")
+        print("=" * 50)
+        
+        results = self.search_models(query, limit=limit)
+        models = results.get('items', [])
+        
+        if not models:
+            print("No models found")
+            return
+        
+        for i, model in enumerate(models, 1):
+            print(f"\n{i}. {self.format_model_info(model)}")
+            print(f"🔗 URL: https://civitai.com/models/{model.get('id')}")
+        
+        total = results.get('metadata', {}).get('totalItems', len(models))
+        print(f"\nShowing {len(models)} of {total} results")
+
+# Convenience functions for easy use
+def get_civitai_client(api_token: Optional[str] = None) -> CivitAiAPI:
+    """Get a CivitAI API client instance"""
+    return CivitAiAPI(api_token)
+
+def download_civitai_model(url: str, destination: Optional[Path] = None, 
+                          api_token: Optional[str] = None) -> bool:
+    """Download a model from CivitAI URL"""
+    client = CivitAiAPI(api_token)
+    return client.download_model(url, destination)
+
+def search_civitai_models(query: str, limit: int = 20, api_token: Optional[str] = None) -> List[Dict]:
+    """Search for models on CivitAI"""
+    client = CivitAiAPI(api_token)
+    result = client.search_models(query, limit=limit)
+    return result.get('items', [])
+
+def get_civitai_model_info(model_id: Union[int, str], api_token: Optional[str] = None) -> Optional[Dict]:
+    """Get information about a CivitAI model"""
+    client = CivitAiAPI(api_token)
+    return client.get_model_info(model_id)
+
+# Export main classes and functions
+__all__ = [
+    'CivitAiAPI',
+    'get_civitai_client',
+    'download_civitai_model', 
+    'search_civitai_models',
+    'get_civitai_model_info'
+]
