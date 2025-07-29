@@ -14,7 +14,7 @@ except ImportError:
 
 # Import enhancements - FIXED IMPORT
 try:
-    from scripts.enhanced_widgets_en import EnhancedWidgetManager  # Changed from enhanced_widgets
+    from scripts.enhanced_widgets_en import EnhancedWidgetManager  # Fixed: was enhanced_widgets
     ENHANCEMENTS_AVAILABLE = True
 except ImportError:
     ENHANCEMENTS_AVAILABLE = False
@@ -48,18 +48,24 @@ class IntegratedWidgetSystem:
             self._load_enhanced_styles()
             
             # Create enhanced interface
-            enhanced_interface = self.enhanced_manager.create_enhanced_interface()
-            
-            # Add original LSDAI compatibility layer
-            compatibility_layer = self._create_compatibility_layer()
-            
-            # Combine interfaces
-            combined_interface = widgets.VBox([
-                enhanced_interface,
-                compatibility_layer
-            ])
-            
-            display(combined_interface)
+            try:
+                enhanced_interface = self.enhanced_manager.create_enhanced_interface()
+                
+                # Add original LSDAI compatibility layer
+                compatibility_layer = self._create_compatibility_layer()
+                
+                # Combine interfaces
+                combined_interface = widgets.VBox([
+                    enhanced_interface,
+                    compatibility_layer
+                ])
+                
+                display(combined_interface)
+                
+            except Exception as e:
+                print(f"⚠️ Enhanced interface failed: {e}")
+                print("🔄 Falling back to original interface...")
+                self._create_original_interface()
             
         else:
             print("📦 Loading Original LSDAI Interface")
@@ -148,40 +154,86 @@ class IntegratedWidgetSystem:
                           layout=widgets.Layout(border='1px solid #ddd', padding='10px'))
         
     def _create_original_interface(self):
-        """Fallback to original interface"""
-        if ORIGINAL_WIDGETS_AVAILABLE:
-            # FIXED: Use available method instead of non-existent create_main_interface
-            try:
-                # Try to create a basic interface using available methods
-                from scripts.widgets_en import *  # Import original widgets functions
-                print("✅ Loading original LSDAI widgets...")
-                # Call the main widgets function from original system
-                display(widgets.HTML('<h2>🎨 LSDAI Original Interface</h2>'))
-                # This will execute the original widgets code
-                
-            except Exception as e:
-                print(f"⚠️ Could not load original interface: {e}")
-                self._create_basic_fallback()
-        else:
+        """Fallback to original interface - FIXED"""
+        try:
+            # FIXED: Import and run the original widgets script
+            print("✅ Loading original LSDAI widgets...")
+            
+            # Execute the original widgets_en.py script
+            # This will display the original interface directly
+            exec(open('scripts/widgets_en.py').read())
+            
+        except Exception as e:
+            print(f"⚠️ Could not load original interface: {e}")
             self._create_basic_fallback()
             
     def _create_basic_fallback(self):
-        """Create basic fallback interface"""
-        fallback = widgets.VBox([
+        """Create basic fallback interface when everything else fails"""
+        print("🔧 Creating basic fallback interface...")
+        
+        # Create minimal working interface
+        basic_widgets = []
+        
+        # XL Models toggle
+        xl_toggle = widgets.ToggleButton(
+            value=js.read_key('XL_models', False),
+            description='SDXL Models',
+            button_style='info'
+        )
+        basic_widgets.append(xl_toggle)
+        
+        # WebUI selection
+        webui_dropdown = widgets.Dropdown(
+            options=['automatic1111', 'ComfyUI', 'InvokeAI'],
+            value=js.read_key('change_webui', 'automatic1111'),
+            description='WebUI:'
+        )
+        basic_widgets.append(webui_dropdown)
+        
+        # Command line arguments
+        args_text = widgets.Textarea(
+            value=js.read_key('commandline_arguments', ''),
+            description='Arguments:',
+            placeholder='--xformers --api --listen'
+        )
+        basic_widgets.append(args_text)
+        
+        # Save button
+        save_button = widgets.Button(
+            description='Save Settings',
+            button_style='success'
+        )
+        
+        def save_settings(b):
+            js.write_key('XL_models', xl_toggle.value)
+            js.write_key('change_webui', webui_dropdown.value)
+            js.write_key('commandline_arguments', args_text.value)
+            print("💾 Settings saved!")
+            
+        save_button.on_click(save_settings)
+        basic_widgets.append(save_button)
+        
+        # Set up change handlers
+        def on_xl_change(change):
+            js.write_key('XL_models', change['new'])
+        xl_toggle.observe(on_xl_change, names='value')
+        
+        def on_webui_change(change):
+            js.write_key('change_webui', change['new'])
+        webui_dropdown.observe(on_webui_change, names='value')
+        
+        def on_args_change(change):
+            js.write_key('commandline_arguments', change['new'])
+        args_text.observe(on_args_change, names='value')
+        
+        # Display basic interface
+        fallback_interface = widgets.VBox([
             widgets.HTML('<h2>🎨 LSDAI Basic Interface</h2>'),
             widgets.HTML('<p>Enhanced widgets not available. Using basic interface.</p>'),
-            widgets.Text(
-                value=js.read_key('commandline_arguments', ''),
-                description='Arguments:',
-                placeholder='--xformers --api'
-            ),
-            widgets.Dropdown(
-                options=['automatic1111', 'ComfyUI', 'InvokeAI'],
-                value=js.read_key('change_webui', 'automatic1111'),
-                description='WebUI:'
-            )
+            *basic_widgets
         ])
-        display(fallback)
+        
+        display(fallback_interface)
 
 # Main integration function
 def create_integrated_widgets():
@@ -189,6 +241,6 @@ def create_integrated_widgets():
     integrated_system = IntegratedWidgetSystem()
     integrated_system.create_integrated_interface()
 
-# For backward compatibility
+# For backward compatibility and direct execution
 if __name__ == "__main__":
     create_integrated_widgets()
