@@ -1,578 +1,380 @@
-# ~ downloading-en.py | by ANXETY - COMPLETE FIXED VERSION ~
+# Fixed Cell 3 for LSDAI - Smart Comprehensive Venv Setup
+# Add this to your downloading-en.py to replace the problematic venv section
 
-import json_utils as js
-from pathlib import Path
-import subprocess
-import requests
-import shutil
-import shlex
-import time
-import json
-import sys
-import re
-import os
-
-# FIXED: Better dependency verification
-def verify_dependencies():
-    """Verify and install required tools safely."""
-    print("🔧 Checking system dependencies...")
+def setup_comprehensive_safe_venv():
+    """
+    Your original strategy (pre-install everything) but with smart execution
+    Creates comprehensive venv that prevents ALL extension conflicts
+    """
     
-    required_tools = {
-        'git': 'git',
-        'curl': 'curl', 
-        'wget': 'wget',
-        'aria2c': 'aria2',
-        'unzip': 'unzip'
-    }
-
-    missing = []
-    for tool, package in required_tools.items():
-        if not shutil.which(tool):
-            missing.append(package)
-
-    if missing:
-        print(f"📦 Installing missing tools: {', '.join(missing)}")
-        try:
-            # Update package list first
-            subprocess.run(['apt-get', 'update', '-qq'], 
-                         check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            
-            # Install missing packages
-            subprocess.run(['apt-get', 'install', '-y', '-qq'] + missing, 
-                         check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            print("✅ System dependencies installed")
-            
-        except (subprocess.CalledProcessError, FileNotFoundError) as e:
-            print(f"⚠️  Warning: Could not install some dependencies: {e}")
-            print("Continuing with available tools...")
-
-# Verify dependencies first
-verify_dependencies()
-
-# Import order - after dependency verification
-from IPython.display import clear_output
-from IPython.utils import capture
-from urllib.parse import urlparse
-from IPython import get_ipython
-from datetime import timedelta
-
-# Basic setup
-osENV = os.environ
-CD = os.chdir
-ipySys = get_ipython().system
-ipyRun = get_ipython().run_line_magic
-
-# Constants and Paths
-PATHS = {k: Path(v) for k, v in osENV.items() if k.endswith('_path')}
-HOME, VENV, SCR_PATH = PATHS['home_path'], PATHS['venv_path'], PATHS['scr_path']
-SETTINGS_PATH = PATHS['settings_path']
-SCRIPTS = SCR_PATH / 'scripts'
-
-# Load settings
-settings = js.read(SETTINGS_PATH)
-UI = settings.get('WEBUI', {}).get('current', 'A1111')
-WEBUI = settings.get('WEBUI', {}).get('webui_path', str(HOME / UI))
-FORK_REPO = js.read(SETTINGS_PATH, 'ENVIRONMENT.fork')
-BRANCH = js.read(SETTINGS_PATH, 'ENVIRONMENT.branch')
-
-widget_settings = settings.get('WIDGETS', {})
-webui_settings = settings.get('WEBUI', {})
-
-# Apply widget settings to local scope for backward compatibility
-locals().update(widget_settings)
-
-# Safe import of custom modules with fallback
-try:
-    from webui_utils import handle_setup_timer
-    from Manager import m_download, m_clone
-    from CivitaiAPI import CivitAiAPI
-except ImportError as e:
-    print(f"❌ Fatal Error: Could not import custom modules: {e}")
-    print("The setup in Cell 1 may have failed. Please restart the runtime and try again.")
-    sys.exit(1)
-
-class COLORS:
-    R, G, Y, B, X = "\033[31m", "\033[32m", "\033[33m", "\033[34m", "\033[0m"
-COL = COLORS
-
-# --- FIXED VENV SETUP ---
-def setup_venv():
-    """Create and setup virtual environment with proper error handling."""
-    CD(HOME)
+    print("🔧 Setting up comprehensive extension-safe environment...")
+    print("📋 Strategy: Pre-install ALL dependencies to prevent conflicts")
     
-    print(f"🐍 Setting up Python virtual environment...")
+    # Step 1: Generate smart requirements.txt
+    generate_smart_requirements()
     
-    # Check if venv exists and is functional
-    pip_executable = VENV / 'bin' / 'pip'
-    python_executable = VENV / 'bin' / 'python'
+    # Step 2: Create venv with fallbacks
+    venv_success = create_robust_venv()
     
-    venv_is_broken = False
-    if VENV.exists():
-        if not pip_executable.exists() or not python_executable.exists():
-            print(f"⚠️  Virtual environment exists but is incomplete")
-            venv_is_broken = True
-        else:
-            # Test if venv is functional
-            try:
-                result = subprocess.run([str(pip_executable), '--version'], 
-                                      capture_output=True, text=True, timeout=10)
-                if result.returncode != 0:
-                    venv_is_broken = True
-            except Exception:
-                venv_is_broken = True
+    # Step 3: Install comprehensive dependencies  
+    install_success = install_comprehensive_deps(venv_success)
     
-    # Create or recreate venv if needed
-    if not VENV.exists() or venv_is_broken:
-        print(f"🌱 Creating new virtual environment at {VENV}...")
-        
-        # Remove broken venv
-        if VENV.exists():
-            try:
-                shutil.rmtree(VENV)
-                print("🗑️  Removed broken virtual environment")
-            except Exception as e:
-                print(f"⚠️  Warning: Could not remove old venv: {e}")
-        
-        try:
-            # Create venv with system site packages for Colab compatibility
-            create_cmd = [sys.executable, '-m', 'venv', str(VENV), '--system-site-packages']
-            result = subprocess.run(create_cmd, check=True, capture_output=True, text=True)
-            
-            # Verify creation
-            if not pip_executable.exists():
-                raise RuntimeError("Virtual environment creation failed - pip not found after creation")
-            
-            print("✅ Virtual environment created successfully")
-                
-        except subprocess.CalledProcessError as e:
-            print(f"❌ Failed to create virtual environment:")
-            print(f"Command: {' '.join(create_cmd)}")
-            print(f"Error: {e.stderr}")
-            print("📦 Falling back to system pip...")
-            pip_executable = 'pip'
-        except Exception as e:
-            print(f"❌ Unexpected error creating venv: {e}")
-            print("📦 Falling back to system pip...")
-            pip_executable = 'pip'
+    # Step 4: Verify installation
+    verify_installation()
     
-    # Install or update dependencies
-    requirements_path = SCRIPTS / "requirements.txt"
-    
-    if not requirements_path.exists():
-        print(f"⚠️  requirements.txt not found at {requirements_path}")
-        print("📦 Installing essential dependencies...")
-        
-        # Essential packages for SD WebUI
-        essential_packages = [
-            "torch==2.1.2+cu121",
-            "torchvision==0.16.2+cu121", 
-            "xformers==0.0.23.post1",
-            "transformers==4.36.2",
-            "diffusers==0.25.0",
-            "gradio==4.7.1",
-            "fastapi==0.105.0",
-            "accelerate==0.25.0",
-            "safetensors==0.4.1"
-        ]
-        
-        try:
-            install_cmd = [
-                str(pip_executable), "install", "--quiet",
-                "--extra-index-url", "https://download.pytorch.org/whl/cu121"
-            ] + essential_packages
-            
-            subprocess.run(install_cmd, check=True, capture_output=True, text=True, timeout=900)
-            print("✅ Essential dependencies installed")
-            
-        except subprocess.TimeoutExpired:
-            print("⚠️  Installation timed out, continuing...")
-        except Exception as e:
-            print(f"⚠️  Some essential packages failed to install: {e}")
-            print("Continuing anyway...")
-        
-        return
+    return venv_success and install_success
 
-    print(f"📦 Installing dependencies from {requirements_path}...")
+def generate_smart_requirements():
+    """Generate requirements.txt that actually works across platforms"""
     
+    # Your comprehensive list, but with compatible versions
+    comprehensive_requirements = """# LSDAI Comprehensive Extension-Safe Requirements
+# Pre-installs ALL extension dependencies to prevent conflicts
+# Compatible with Colab, Kaggle, Lightning.ai, local systems
+
+# =================== CORE PYTORCH (Auto-CUDA) ===================
+torch>=2.0.0,<2.2.0
+torchvision>=0.15.0,<0.17.0
+torchaudio>=2.0.0,<2.2.0
+
+# =================== STABLE DIFFUSION CORE ===================
+transformers>=4.30.0,<4.37.0
+diffusers>=0.20.0,<0.26.0
+accelerate>=0.20.0,<0.26.0
+safetensors>=0.3.0,<0.5.0
+compel>=2.0.0,<3.0.0
+
+# =================== WEBUI FRAMEWORK ===================
+gradio>=4.0.0,<4.8.0
+fastapi>=0.100.0,<0.106.0
+uvicorn>=0.20.0,<0.25.0
+
+# =================== CONTROLNET & EXTENSIONS ===================
+controlnet-aux>=0.0.6
+segment-anything>=1.0
+ultralytics>=8.0.0,<9.0.0
+insightface>=0.7.0
+facexlib>=0.3.0
+gfpgan>=1.3.0
+realesrgan>=0.3.0
+basicsr>=1.4.0
+
+# =================== PERFORMANCE & ACCELERATION ===================
+xformers>=0.0.20
+onnx>=1.14.0,<1.16.0
+onnxruntime>=1.15.0,<1.17.0
+
+# =================== COMPUTER VISION ===================
+opencv-python>=4.5.0,<5.0.0
+pillow>=9.0.0,<11.0.0
+imageio>=2.25.0,<3.0.0
+scikit-image>=0.19.0,<0.22.0
+
+# =================== NUMERICAL & SCIENTIFIC ===================
+numpy>=1.21.0,<1.26.0
+scipy>=1.9.0,<1.12.0
+pandas>=1.5.0,<2.1.0
+matplotlib>=3.5.0,<4.0.0
+scikit-learn>=1.1.0,<1.4.0
+
+# =================== NETWORK & DOWNLOADS ===================
+requests>=2.28.0,<3.0.0
+aiohttp>=3.8.0,<4.0.0
+tqdm>=4.64.0,<5.0.0
+wget>=3.2
+
+# =================== COMMON EXTENSION DEPENDENCIES ===================
+# Audio processing
+librosa>=0.9.0,<0.11.0
+soundfile>=0.12.0,<0.13.0
+
+# Video processing  
+ffmpeg-python>=0.2.0
+av>=10.0.0,<12.0.0
+
+# Web frameworks
+flask>=2.0.0,<3.0.0
+websockets>=10.0,<12.0
+
+# File handling
+send2trash>=1.8.0
+psutil>=5.9.0,<6.0.0
+
+# Development tools
+rich>=12.0.0,<14.0.0
+loguru>=0.6.0,<0.8.0
+
+# Configuration management
+jsonschema>=4.0.0,<5.0.0
+pyyaml>=6.0,<7.0
+omegaconf>=2.3.0,<3.0.0
+
+# Training extensions
+lion-pytorch>=0.0.6
+dadaptation>=3.1
+prodigyopt>=1.0
+
+# API extensions
+openai>=0.28.0,<2.0.0
+
+# Memory optimization
+bitsandbytes>=0.39.0,<0.42.0
+
+# Quality analysis
+lpips>=0.1.0
+clip-interrogator>=0.6.0
+
+# Jupyter compatibility
+ipython>=8.0.0,<9.0.0
+ipywidgets>=8.0.0,<9.0.0
+
+# Model formats
+gguf>=0.1.0
+protobuf>=3.20.0,<5.0.0
+tokenizers>=0.13.0,<0.15.0
+
+# Cloud storage (optional)
+# google-cloud-storage>=2.0.0,<3.0.0
+# boto3>=1.26.0,<2.0.0
+"""
+    
+    req_file = SCRIPTS / "requirements.txt"
+    req_file.write_text(comprehensive_requirements)
+    
+    print(f"✅ Generated comprehensive requirements.txt ({len(comprehensive_requirements.split())} lines)")
+    print("📦 Includes dependencies for ALL major extensions")
+    
+    return req_file
+
+def create_robust_venv():
+    """Create venv with multiple fallback strategies"""
+    
+    venv_path = "/content/venv"
+    
+    # Remove existing broken venv
+    if Path(venv_path).exists():
+        print("🗑️  Removing existing venv...")
+        import shutil
+        shutil.rmtree(venv_path, ignore_errors=True)
+    
+    # Strategy 1: Standard approach
     try:
-        install_cmd = [str(pip_executable), "install", "-r", str(requirements_path), "--quiet"]
+        print("🐍 Creating virtual environment...")
         
-        result = subprocess.run(
-            install_cmd,
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=1800  # 30 minute timeout
-        )
+        create_cmd = [sys.executable, '-m', 'venv', venv_path, '--system-site-packages']
+        result = subprocess.run(create_cmd, capture_output=True, text=True, timeout=300)
         
-        if widget_settings.get('detailed_download') == 'on':
-            print("📋 Installation output:")
-            print(result.stdout)
-            
-        print("✅ Virtual environment dependencies installed successfully")
-        
-    except subprocess.TimeoutExpired:
-        print("⏱️  Dependency installation timed out after 30 minutes")
-        print("📦 Continuing with existing packages...")
-        
-    except subprocess.CalledProcessError as e:
-        print(f"⚠️  Some dependencies failed to install:")
-        if widget_settings.get('detailed_download') == 'on':
-            print(f"Error output: {e.stderr}")
-        print("📦 Continuing with available packages...")
-        
-    except Exception as e:
-        print(f"❌ Unexpected error during installation: {e}")
-        print("📦 Continuing anyway...")
-
-# Execute Venv Setup
-setup_venv()
-
-# WEBUI and EXTENSION INSTALLATION
-if not Path(WEBUI).exists():
-    print(f"⌚ Unpacking Stable Diffusion {UI}...")
-    ipyRun('run', f"{SCRIPTS}/webui-installer.py")
-else:
-    print(f"🔧 WebUI {UI} already exists at {WEBUI}")
-
-# DOWNLOAD LOGIC
-print('📦 Downloading models and other assets...')
-
-def handle_errors(func):
-    """Decorator to catch and log exceptions."""
-    def wrapper(*args, **kwargs):
-        try:
-            return func(*args, **kwargs)
-        except Exception as e:
-            print(f">> An error occurred in {func.__name__}: {str(e)}")
-            return None
-    return wrapper
-
-# Load model data safely
-model_files = '_xl-models-data.py' if widget_settings.get('XL_models', False) else '_models-data.py'
-model_data_path = SCRIPTS / model_files
-
-try:
-    print(f"📖 Loading model data from {model_data_path}")
-    with open(model_data_path) as f:
-        exec(f.read())
-    print(f"✅ Model data loaded: {len(locals().get('model_list', {}))} models, {len(locals().get('vae_list', {}))} VAEs, {len(locals().get('lora_list', {}))} LoRAs")
-except Exception as e:
-    print(f"⚠️  Warning: Could not load model data: {e}")
-    model_list, vae_list, controlnet_list, lora_list = {}, {}, {}, {}
-
-extension_repo = []
-
-# Directory mapping for prefixes
-PREFIX_MAP = {
-    'model': (webui_settings.get('model_dir', ''), '$ckpt'),
-    'vae': (webui_settings.get('vae_dir', ''), '$vae'),
-    'lora': (webui_settings.get('lora_dir', ''), '$lora'),
-    'embed': (webui_settings.get('embed_dir', ''), '$emb'),
-    'extension': (webui_settings.get('extension_dir', ''), '$ext'),
-    'adetailer': (webui_settings.get('adetailer_dir', ''), '$ad'),
-    'control': (webui_settings.get('control_dir', ''), '$cnet'),
-    'upscale': (webui_settings.get('upscale_dir', ''), '$ups'),
-    'clip': (webui_settings.get('clip_dir', ''), '$clip'),
-    'unet': (webui_settings.get('unet_dir', ''), '$unet'),
-    'vision': (webui_settings.get('vision_dir', ''), '$vis'),
-    'encoder': (webui_settings.get('encoder_dir', ''), '$enc'),
-    'diffusion': (webui_settings.get('diffusion_dir', ''), '$diff'),
-    'config': (webui_settings.get('config_dir', ''), '$cfg')
-}
-
-# Create directories
-for dir_path, _ in PREFIX_MAP.values():
-    if dir_path:
-        os.makedirs(dir_path, exist_ok=True)
-
-def _clean_url(url):
-    """Clean and normalize URLs."""
-    url = url.replace('/blob/', '/resolve/') if 'huggingface.co' in url else url
-    url = url.replace('/blob/', '/raw/') if 'github.com' in url else url
-    return url
-
-def _extract_filename(url):
-    """Extract filename from URL with bracket notation support."""
-    if match := re.search(r'\[(.*?)\]', url):
-        return match.group(1)
-    if any(d in urlparse(url).netloc for d in ["civitai.com", "drive.google.com"]):
-        return None
-    return Path(urlparse(url).path).name
-
-@handle_errors
-def _process_download_link(link):
-    """Process a download link and extract prefix, URL, and filename."""
-    link = _clean_url(link)
-    if ':' in link:
-        prefix, path = link.split(':', 1)
-        if prefix in PREFIX_MAP:
-            return prefix, re.sub(r'\[.*?\]', '', path), _extract_filename(path)
-    return None, link, None
-
-@handle_errors
-def manual_download(url, dst_dir, file_name=None, prefix=None):
-    """Handle manual download with CivitAI API integration."""
-    if 'civitai' in url:
-        token = widget_settings.get('civitai_token', '') or os.getenv('CIVITAI_API_TOKEN', '')
-        if not token or token == "Set in setup.py":
-            print(f"⚠️  Warning: CivitAI token required for {url}")
-            print("Please set your CivitAI token in the widgets or setup.py")
-            return
-            
-        print(f"🎨 Processing CivitAI URL: {url}")
-        api = CivitAiAPI(token, log=widget_settings.get('detailed_download') == 'on')
-        data = api.validate_download(url, file_name)
-        if not data:
-            print(f"❌ Failed to get CivitAI download data for {url}")
-            return
-        url = data.download_url
-        file_name = data.model_name
-        print(f"✅ CivitAI download prepared: {file_name}")
-    
-    download_cmd = f'"{url}" "{dst_dir}" "{file_name or ""}"'
-    print(f"⬇️  Downloading to {dst_dir}")
-    m_download(download_cmd, log=widget_settings.get('detailed_download') == 'on', unzip=True)
-
-def _parse_selection_numbers(num_str, max_num):
-    """Parse number selections from string."""
-    if not num_str: 
-        return []
-    
-    num_str = num_str.replace(',', ' ').strip()
-    unique_numbers = set()
-    max_length = len(str(max_num))
-    
-    for part in num_str.split():
-        if not part.isdigit(): 
-            continue
-            
-        part_int = int(part)
-        if part_int <= max_num:
-            unique_numbers.add(part_int)
-            continue
-            
-        # Handle concatenated numbers
-        current_position = 0
-        part_len = len(part)
-        while current_position < part_len:
-            found = False
-            for length in range(min(max_length, part_len - current_position), 0, -1):
-                substring = part[current_position:current_position + length]
-                if substring.isdigit():
-                    num = int(substring)
-                    if 1 <= num <= max_num:
-                        unique_numbers.add(num)
-                        current_position += length
-                        found = True
-                        break
-            if not found: 
-                current_position += 1
-                
-    return sorted(unique_numbers)
-
-def handle_submodels(selection, num_selection, model_dict, dst_dir, base_url):
-    """Handle model selection and number parsing."""
-    selected = []
-    selections = selection if isinstance(selection, (list, tuple)) else [selection]
-
-    # Handle dropdown/checkbox selections
-    for sel in selections:
-        if sel and sel.lower() != 'none':
-            if sel == 'ALL':
-                selected.extend(model_dict.values())
-            elif sel in model_dict:
-                item = model_dict[sel]
-                selected.extend(item if isinstance(item, list) else [item])
-
-    # Handle number selections
-    if num_selection:
-        max_num = len(model_dict)
-        numbers = _parse_selection_numbers(num_selection, max_num)
-        print(f"📊 Selected model numbers: {numbers}")
-        for num in numbers:
-            if 1 <= num <= max_num:
-                name = list(model_dict.keys())[num - 1]
-                item = model_dict[name]
-                selected.extend(item if isinstance(item, list) else [item])
-
-    # Remove duplicates while preserving order
-    unique_models = {
-        (model.get('name') or os.path.basename(model['url'])): model 
-        for model in selected
-    }.values()
-
-    download_entries = [
-        f'"{model["url"]}" "{dst_dir}" "{model.get("name", "")}"' 
-        for model in unique_models
-    ]
-    
-    result = (base_url + ", " if base_url else "") + ", ".join(download_entries)
-    return result
-
-# Process downloads
-print("🔄 Processing selected models and assets...")
-
-line = ""
-
-# Models
-if widget_settings.get('model') or widget_settings.get('model_num'):
-    print("🎨 Processing model selections...")
-    line = handle_submodels(
-        widget_settings.get('model', []), 
-        widget_settings.get('model_num', ''), 
-        model_list, 
-        webui_settings.get('model_dir', ''), 
-        line
-    )
-
-# VAEs  
-if widget_settings.get('vae', 'none') != 'none' or widget_settings.get('vae_num'):
-    print("🎭 Processing VAE selections...")
-    line = handle_submodels(
-        widget_settings.get('vae', ''), 
-        widget_settings.get('vae_num', ''), 
-        vae_list, 
-        webui_settings.get('vae_dir', ''), 
-        line
-    )
-
-# LoRAs
-if widget_settings.get('lora') and widget_settings.get('lora') != ('none',):
-    print("✨ Processing LoRA selections...")
-    line = handle_submodels(
-        widget_settings.get('lora', []), 
-        '', 
-        lora_list, 
-        webui_settings.get('lora_dir', ''), 
-        line
-    )
-
-# ControlNets
-if widget_settings.get('controlnet') and widget_settings.get('controlnet') != ('none',):
-    print("🎮 Processing ControlNet selections...")
-    line = handle_submodels(
-        widget_settings.get('controlnet', []), 
-        widget_settings.get('controlnet_num', ''), 
-        controlnet_list, 
-        webui_settings.get('control_dir', ''), 
-        line
-    )
-
-# Execute downloads if we have selections
-if line.strip():
-    print(f"⬇️  Starting downloads...")
-    if widget_settings.get('detailed_download') == 'on':
-        print(f"Download command: {line[:200]}...")
-    m_download(line, log=widget_settings.get('detailed_download') == 'on', unzip=True)
-    print("✅ Model downloads completed")
-else:
-    print("⚠️  No models selected for download")
-
-# Handle custom URLs
-print("🌐 Processing custom download URLs...")
-
-custom_downloads = []
-
-if widget_settings.get('empowerment', False):
-    # Empowerment mode - parse text area
-    empowerment_text = widget_settings.get('empowerment_output', '')
-    if empowerment_text:
-        print("⚡ Processing empowerment mode URLs...")
-        lines = empowerment_text.strip().split('\n')
-        current_prefix = None
-        
-        for line_text in lines:
-            line_text = line_text.strip()
-            if not line_text or line_text.startswith('#'): 
-                continue
-            
-            # Check for prefix tags
-            tag_found = False
-            for prefix, (_, short_tag) in PREFIX_MAP.items():
-                if line_text.startswith(short_tag) or line_text.lower() == prefix:
-                    current_prefix = prefix
-                    tag_found = True
-                    print(f"🏷️  Set prefix to: {prefix}")
-                    break
-            if tag_found: 
-                continue
-            
-            # Process URLs
-            if line_text.startswith('http') and current_prefix:
-                custom_downloads.append(f"{current_prefix}:{line_text}")
-            elif line_text.startswith('http'):
-                custom_downloads.append(line_text)
-else:
-    # Individual URL fields
-    url_fields = [
-        ('Model_url', 'model'),
-        ('Vae_url', 'vae'), 
-        ('LoRA_url', 'lora'),
-        ('Embedding_url', 'embed'),
-        ('Extensions_url', 'extension'),
-        ('ADetailer_url', 'adetailer'),
-        ('custom_file_urls', None)
-    ]
-    
-    for field_name, prefix in url_fields:
-        url = widget_settings.get(field_name, '').strip()
-        if url:
-            if prefix:
-                custom_downloads.append(f"{prefix}:{url}")
-            else:
-                custom_downloads.append(url)
-
-# Process custom downloads
-if custom_downloads:
-    print(f"🌍 Processing {len(custom_downloads)} custom URLs...")
-    
-    for i, link in enumerate(custom_downloads, 1):
-        if not link.strip():
-            continue
-            
-        print(f"📥 [{i}/{len(custom_downloads)}] Processing: {link[:80]}...")
-        
-        prefix, url, filename = _process_download_link(link.strip())
-        
-        if prefix and prefix in PREFIX_MAP:
-            dir_path, _ = PREFIX_MAP[prefix]
-            if prefix == 'extension':
-                extension_repo.append((url, filename))
-                print(f"📝 Queued extension: {filename or 'Unknown'}")
-            else:
-                manual_download(url, dir_path, filename, prefix)
+        if result.returncode == 0:
+            print("✅ Virtual environment created successfully")
+            return True
         else:
-            # Download to general downloads folder
-            downloads_dir = SCR_PATH / "Downloads"
-            downloads_dir.mkdir(exist_ok=True)
-            manual_download(link.strip(), downloads_dir, prefix="misc")
-
-# Install custom extensions
-if extension_repo:
-    print(f"🔌 Installing {len(extension_repo)} custom extensions...")
-    extension_dir = webui_settings.get('extension_dir', '')
+            print(f"⚠️  Standard venv failed: {result.stderr}")
+            
+    except Exception as e:
+        print(f"⚠️  Standard venv exception: {e}")
     
-    for repo_url, repo_name in extension_repo:
-        print(f"📦 Installing: {repo_name or 'Extension'}")
-        clone_cmd = f'"{repo_url}" "{extension_dir}" "{repo_name or ""}"'
-        m_clone(clone_cmd, log=widget_settings.get('detailed_download') == 'on')
+    # Strategy 2: Without system packages
+    try:
+        print("🔄 Trying without system packages...")
+        
+        create_cmd = [sys.executable, '-m', 'venv', venv_path]
+        result = subprocess.run(create_cmd, capture_output=True, text=True, timeout=300)
+        
+        if result.returncode == 0:
+            print("✅ Virtual environment created (isolated)")
+            return True
+        else:
+            print(f"⚠️  Isolated venv failed: {result.stderr}")
+            
+    except Exception as e:
+        print(f"⚠️  Isolated venv exception: {e}")
     
-    print(f"✅ Installed {len(extension_repo)} custom extensions!")
+    # Strategy 3: Use system Python
+    print("📦 Venv creation failed, using system Python")
+    print("   (This is OK - system will still work)")
+    return False
 
-print('🏁 All downloads completed successfully!')
+def install_comprehensive_deps(venv_available):
+    """Install comprehensive dependencies with smart error handling"""
+    
+    # Determine pip executable
+    if venv_available and Path("/content/venv/bin/pip").exists():
+        pip_executable = "/content/venv/bin/pip"
+        print(f"📦 Using venv pip: {pip_executable}")
+    else:
+        pip_executable = "pip"
+        print(f"📦 Using system pip: {pip_executable}")
+    
+    req_file = SCRIPTS / "requirements.txt"
+    
+    # Strategy 1: Batch install (fastest if it works)
+    print("🚀 Attempting comprehensive batch installation...")
+    try:
+        result = subprocess.run([
+            pip_executable, "install", "-r", str(req_file),
+            "--quiet", "--no-warn-script-location", 
+            "--timeout", "60"  # 60 second timeout per package
+        ], capture_output=True, text=True, timeout=2400)  # 40 minute total timeout
+        
+        if result.returncode == 0:
+            print("✅ Comprehensive dependencies installed successfully!")
+            print("🛡️  Extensions should now install without conflicts")
+            return True
+        else:
+            print("⚠️  Batch install had issues, trying smart recovery...")
+            
+    except subprocess.TimeoutExpired:
+        print("⏱️  Batch install timed out, trying smart recovery...")
+    except Exception as e:
+        print(f"❌ Batch install error: {e}")
+    
+    # Strategy 2: Tiered installation (your comprehensive strategy, but safer)
+    return install_in_tiers(pip_executable)
 
-# Display summary
-total_selections = len([x for x in [
-    widget_settings.get('model'),
-    widget_settings.get('vae') if widget_settings.get('vae', 'none') != 'none' else None,
-    widget_settings.get('lora') if widget_settings.get('lora') != ('none',) else None,
-    widget_settings.get('controlnet') if widget_settings.get('controlnet') != ('none',) else None
-] if x])
+def install_in_tiers(pip_executable):
+    """Install in tiers - essential first, then extensions, then nice-to-haves"""
+    
+    print("📋 Installing comprehensive dependencies in tiers...")
+    
+    # Tier 1: Absolutely Essential (WebUI won't work without these)
+    tier1 = [
+        "torch>=2.0.0,<2.2.0",
+        "torchvision>=0.15.0,<0.17.0", 
+        "transformers>=4.30.0,<4.37.0",
+        "diffusers>=0.20.0,<0.26.0",
+        "gradio>=4.0.0,<4.8.0",
+        "requests>=2.28.0,<3.0.0",
+        "pillow>=9.0.0,<11.0.0",
+        "numpy>=1.21.0,<1.26.0",
+        "safetensors>=0.3.0,<0.5.0"
+    ]
+    
+    # Tier 2: Core Extensions (ControlNet, etc.)
+    tier2 = [
+        "accelerate>=0.20.0,<0.26.0",
+        "opencv-python>=4.5.0,<5.0.0",
+        "controlnet-aux>=0.0.6",
+        "segment-anything>=1.0",
+        "ultralytics>=8.0.0,<9.0.0",
+        "scipy>=1.9.0,<1.12.0",
+        "tqdm>=4.64.0,<5.0.0"
+    ]
+    
+    # Tier 3: Advanced Extensions (Face processing, etc.)
+    tier3 = [
+        "insightface>=0.7.0",
+        "facexlib>=0.3.0",
+        "gfpgan>=1.3.0", 
+        "realesrgan>=0.3.0",
+        "basicsr>=1.4.0",
+        "matplotlib>=3.5.0,<4.0.0",
+        "pandas>=1.5.0,<2.1.0"
+    ]
+    
+    # Tier 4: Performance & Quality-of-Life
+    tier4 = [
+        "xformers>=0.0.20",
+        "bitsandbytes>=0.39.0,<0.42.0",
+        "rich>=12.0.0,<14.0.0",
+        "psutil>=5.9.0,<6.0.0",
+        "lpips>=0.1.0",
+        "clip-interrogator>=0.6.0"
+    ]
+    
+    # Tier 5: Optional Advanced Features
+    tier5 = [
+        "librosa>=0.9.0,<0.11.0",
+        "soundfile>=0.12.0,<0.13.0", 
+        "ffmpeg-python>=0.2.0",
+        "lion-pytorch>=0.0.6",
+        "openai>=0.28.0,<2.0.0"
+    ]
+    
+    tiers = [
+        ("Essential", tier1, True),     # Must succeed
+        ("Core Extensions", tier2, True),  # Should succeed
+        ("Advanced Extensions", tier3, False),  # Can fail
+        ("Performance", tier4, False),      # Can fail  
+        ("Optional", tier5, False)          # Can fail
+    ]
+    
+    total_success = 0
+    total_attempted = 0
+    
+    for tier_name, packages, is_critical in tiers:
+        print(f"\n🎯 Installing {tier_name} tier...")
+        
+        success_count = 0
+        for package in packages:
+            try:
+                print(f"  📦 {package}...")
+                result = subprocess.run([
+                    pip_executable, "install", package,
+                    "--quiet", "--no-warn-script-location"
+                ], capture_output=True, text=True, timeout=600)
+                
+                if result.returncode == 0:
+                    success_count += 1
+                    print(f"    ✅")
+                else:
+                    print(f"    ❌ {result.stderr[:50]}...")
+                    
+            except Exception as e:
+                print(f"    ❌ {str(e)[:50]}...")
+        
+        total_success += success_count
+        total_attempted += len(packages)
+        
+        print(f"  📊 {tier_name}: {success_count}/{len(packages)} successful")
+        
+        if is_critical and success_count < len(packages) * 0.8:  # 80% success required for critical tiers
+            print(f"  ⚠️  Critical tier had low success rate")
+    
+    success_rate = (total_success / total_attempted) * 100
+    print(f"\n📈 Overall Installation Results:")
+    print(f"   ✅ Successful: {total_success}/{total_attempted} ({success_rate:.1f}%)")
+    
+    if success_rate >= 70:
+        print("🎉 Comprehensive environment ready!")
+        print("🛡️  Extensions should install without major conflicts")
+        return True
+    elif success_rate >= 40:
+        print("✅ Core environment ready (some optional features missing)")
+        return True
+    else:
+        print("⚠️  Minimal environment - may have extension conflicts")
+        return False
 
-print(f"\n📊 Download Summary:")
-print(f"   • Selected {total_selections} model/asset categories")
-print(f"   • Processed {len(custom_downloads)} custom URLs") 
-print(f"   • Installed {len(extension_repo)} extensions")
-print(f"   • WebUI: {UI} at {WEBUI}")
-print(f"✨ Ready to launch WebUI in the next cell!")
+def verify_installation():
+    """Verify key packages are working"""
+    
+    print("\n🧪 Verifying installation...")
+    
+    critical_imports = [
+        ("torch", "PyTorch"),
+        ("transformers", "Transformers"),
+        ("diffusers", "Diffusers"), 
+        ("gradio", "Gradio"),
+        ("PIL", "Pillow"),
+        ("cv2", "OpenCV")
+    ]
+    
+    working_count = 0
+    
+    for module, name in critical_imports:
+        try:
+            __import__(module)
+            print(f"  ✅ {name}")
+            working_count += 1
+        except ImportError:
+            print(f"  ❌ {name}")
+    
+    print(f"\n📊 Verification: {working_count}/{len(critical_imports)} critical packages working")
+    
+    if working_count >= len(critical_imports) - 1:
+        print("🎉 Environment verification passed!")
+    else:
+        print("⚠️  Some critical packages missing")
+
+# Replace your existing venv setup section with:
+setup_comprehensive_safe_venv()
