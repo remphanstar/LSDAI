@@ -124,19 +124,59 @@ print("   - Extension installation step complete.")
 # 4. MODEL & ASSET DOWNLOAD
 # -------------------------
 print("\n🎨 4. Downloading Models and Assets...")
-print("   - NOTE: This version uses the original `downloading_en.py` for model downloads.")
-print("   - Running the script now with raw output...")
+print("   - This process will now read from settings.json and download accordingly.")
 
 try:
-    # Ensure we are in the correct directory for the script to run
-    os.chdir(SCR_PATH)
-    # Use '%run' to execute the original download script in the current kernel context
-    # This will inherit the environment and print output directly.
-    get_ipython().run_line_magic('run', '-i scripts/downloading_en.py')
-    os.chdir(HOME)
+    # This section now contains the logic directly, removing the need for downloading_en.py
+    from modules.Manager import m_download
+    
+    model_files = '_xl_models_data.py' if WIDGETS_DATA.get('XL_models') == 'on' else '_models_data.py'
+    models_data_path = SCRIPTS_PATH / model_files
+    
+    local_vars = {}
+    with open(models_data_path) as f:
+        exec(f.read(), {}, local_vars)
+    
+    model_list = local_vars.get('model_list', {})
+    vae_list = local_vars.get('vae_list', {})
+    lora_list = local_vars.get('lora_list', {})
+    controlnet_list = local_vars.get('controlnet_list', {})
+
+    download_queue = []
+
+    # Helper to add to queue
+    def add_to_queue(selection, data_dict):
+        if not selection or selection == 'none': return
+        
+        items = [selection] if not isinstance(selection, list) else selection
+        for item_name in items:
+            if item_name in data_dict:
+                download_url = data_dict[item_name].get('url')
+                if download_url:
+                    download_queue.append(download_url)
+
+    # Populate queue from settings
+    add_to_queue(WIDGETS_DATA.get('model'), model_list)
+    add_to_queue(WIDGETS_DATA.get('vae'), vae_list)
+    add_to_queue(WIDGETS_DATA.get('lora'), lora_list)
+    add_to_queue(WIDGETS_DATA.get('controlnet'), controlnet_list)
+    
+    # Add custom URLs
+    for url_key in ['Model_url', 'Vae_url', 'LoRA_url', 'Embedding_url']:
+        urls = WIDGETS_DATA.get(url_key, '')
+        if urls:
+            download_queue.extend([url.strip() for url in urls.split(',') if url.strip()])
+
+    if not download_queue:
+        print("   - No models selected for download.")
+    else:
+        print(f"   - Starting download of {len(download_queue)} item(s)...")
+        # Construct the download command string
+        download_command = " ".join([f'"{url}"' for url in download_queue])
+        m_download(download_command, log=True, unzip=True)
+    
 except Exception as e:
-    print(f"   - ❌ ERROR running downloading_en.py: {e}")
-    os.chdir(HOME)
+    print(f"   - ❌ ERROR during model download phase: {e}")
 
 print("   - Model download step complete.")
 
