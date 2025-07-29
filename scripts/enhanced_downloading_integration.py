@@ -45,7 +45,7 @@ else:
         print(f"   - ⚠️ Found an incomplete venv. Removing it now.")
         get_ipython().system(f'rm -rf "{VENV_PATH}"')
     
-    print("   - Creating venv directory...")
+    print("   - Creating venv directory using 'python -m venv'...")
     get_ipython().system(f'python -m venv "{VENV_PATH}"')
     
     print("\n   - Installing/Updating pip, setuptools, and wheel...")
