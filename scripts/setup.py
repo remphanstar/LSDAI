@@ -43,11 +43,11 @@ def detect_platform_home():
         elif 'content' in cwd.parts:
             return Path('/content')
         else:
-            return cwd.parent if cwd.name == 'ANXETY' else cwd
+            return cwd.parent if cwd.name == 'LSDAI' else cwd
 
 # FIXED: Platform-agnostic path detection
 HOME = detect_platform_home()
-SCR_PATH = HOME / 'ANXETY'
+SCR_PATH = HOME / 'LSDAI'
 SETTINGS_PATH = SCR_PATH / 'settings.json'
 VENV_PATH = HOME / 'venv'
 MODULES_FOLDER = SCR_PATH / "modules"
@@ -112,7 +112,7 @@ def reinitialize_paths(base_path):
     """Re-initializes global path variables based on a new home directory."""
     global HOME, SCR_PATH, SETTINGS_PATH, VENV_PATH, MODULES_FOLDER
     HOME = base_path
-    SCR_PATH = HOME / 'ANXETY'
+    SCR_PATH = HOME / 'LSDAI'
     SETTINGS_PATH = SCR_PATH / 'settings.json'
     VENV_PATH = HOME / 'venv'
     MODULES_FOLDER = SCR_PATH / "modules"
