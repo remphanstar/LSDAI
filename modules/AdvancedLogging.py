@@ -1,634 +1,522 @@
-# Advanced Logging and Monitoring System
-# Save as: modules/AdvancedLogging.py
+# AdvancedLogging.py - Advanced Logging and Monitoring System for LSDAI
+# Provides comprehensive logging, monitoring, and system information tracking
 
-import json_utils as js
-from pathlib import Path
-import threading
-import logging
-import sqlite3
-import psutil
+import os
 import json
 import time
-import os
-import re
+import threading
+import psutil
+import platform
+from pathlib import Path
+from typing import Dict, List, Optional, Any
 from datetime import datetime, timedelta
-from collections import defaultdict, deque
-import gzip
-import traceback
+import subprocess
 
-class PerformanceMetrics:
-    """Performance metrics collection and analysis"""
-    
-    def __init__(self, window_size=1000):
-        self.window_size = window_size
-        self.metrics = {
-            'generation_times': deque(maxlen=window_size),
-            'memory_usage': deque(maxlen=window_size),
-            'gpu_usage': deque(maxlen=window_size),
-            'model_load_times': deque(maxlen=window_size),
-            'api_response_times': deque(maxlen=window_size),
-            'error_counts': defaultdict(int),
-            'feature_usage': defaultdict(int)
-        }
-        self.session_start = time.time()
-        self.total_generations = 0
-        self.total_errors = 0
-        
-    def record_generation(self, duration, settings=None):
-        """Record image generation metrics"""
-        self.metrics['generation_times'].append({
-            'timestamp': time.time(),
-            'duration': duration,
-            'settings': settings or {}
-        })
-        self.total_generations += 1
-        
-    def record_memory_usage(self, ram_percent, vram_mb=None):
-        """Record memory usage"""
-        self.metrics['memory_usage'].append({
-            'timestamp': time.time(),
-            'ram_percent': ram_percent,
-            'vram_mb': vram_mb
-        })
-        
-    def record_gpu_usage(self, gpu_percent, temperature=None):
-        """Record GPU usage"""
-        self.metrics['gpu_usage'].append({
-            'timestamp': time.time(),
-            'usage_percent': gpu_percent,
-            'temperature': temperature
-        })
-        
-    def record_model_load(self, model_name, duration):
-        """Record model loading time"""
-        self.metrics['model_load_times'].append({
-            'timestamp': time.time(),
-            'model_name': model_name,
-            'duration': duration
-        })
-        
-    def record_api_call(self, endpoint, duration, success=True):
-        """Record API call metrics"""
-        self.metrics['api_response_times'].append({
-            'timestamp': time.time(),
-            'endpoint': endpoint,
-            'duration': duration,
-            'success': success
-        })
-        
-    def record_error(self, error_type, details=None):
-        """Record error occurrence"""
-        self.metrics['error_counts'][error_type] += 1
-        self.total_errors += 1
-        
-    def record_feature_usage(self, feature_name):
-        """Record feature usage"""
-        self.metrics['feature_usage'][feature_name] += 1
-        
-    def get_statistics(self):
-        """Get comprehensive statistics"""
-        now = time.time()
-        session_duration = now - self.session_start
-        
-        stats = {
-            'session': {
-                'duration_hours': session_duration / 3600,
-                'total_generations': self.total_generations,
-                'total_errors': self.total_errors,
-                'avg_generations_per_hour': self.total_generations / (session_duration / 3600) if session_duration > 0 else 0
-            },
-            'performance': {},
-            'usage': dict(self.metrics['feature_usage']),
-            'errors': dict(self.metrics['error_counts'])
-        }
-        
-        # Calculate generation time statistics
-        if self.metrics['generation_times']:
-            times = [g['duration'] for g in self.metrics['generation_times']]
-            stats['performance']['generation_times'] = {
-                'avg': sum(times) / len(times),
-                'min': min(times),
-                'max': max(times),
-                'median': sorted(times)[len(times)//2],
-                'count': len(times)
-            }
-            
-        # Calculate memory statistics
-        if self.metrics['memory_usage']:
-            ram_usage = [m['ram_percent'] for m in self.metrics['memory_usage']]
-            stats['performance']['memory'] = {
-                'avg_ram_percent': sum(ram_usage) / len(ram_usage),
-                'max_ram_percent': max(ram_usage),
-                'current_ram_percent': ram_usage[-1] if ram_usage else 0
-            }
-            
-            vram_usage = [m['vram_mb'] for m in self.metrics['memory_usage'] if m['vram_mb']]
-            if vram_usage:
-                stats['performance']['memory']['avg_vram_mb'] = sum(vram_usage) / len(vram_usage)
-                stats['performance']['memory']['max_vram_mb'] = max(vram_usage)
-                
-        return stats
-        
-    def export_metrics(self, filepath):
-        """Export metrics to file"""
-        data = {
-            'session_start': self.session_start,
-            'metrics': {
-                'generation_times': list(self.metrics['generation_times']),
-                'memory_usage': list(self.metrics['memory_usage']),
-                'gpu_usage': list(self.metrics['gpu_usage']),
-                'model_load_times': list(self.metrics['model_load_times']),
-                'api_response_times': list(self.metrics['api_response_times']),
-                'error_counts': dict(self.metrics['error_counts']),
-                'feature_usage': dict(self.metrics['feature_usage'])
-            },
-            'statistics': self.get_statistics()
-        }
-        
-        with open(filepath, 'w') as f:
-            json.dump(data, f, indent=2)
+# Get environment paths
+HOME = Path(os.environ.get('home_path', '/content'))
+SCR_PATH = Path(os.environ.get('scr_path', HOME / 'LSDAI'))
+LOGS_PATH = SCR_PATH / 'logs'
 
-class AdvancedLogger:
-    """Advanced logging system with structured logging and analysis"""
+class SystemMonitor:
+    """Monitor system resources and performance"""
     
-    def __init__(self, log_dir=None):
-        if log_dir is None:
-            log_dir = Path(os.getcwd()) / "logs"
-            
-        self.log_dir = Path(log_dir)
-        self.log_dir.mkdir(parents=True, exist_ok=True)
-        
-        self.db_path = self.log_dir / "events.db"
-        self.current_log_file = None
-        self.metrics = PerformanceMetrics()
-        
-        self._setup_database()
-        self._setup_file_logging()
-        self._setup_structured_logging()
-        
-    def _setup_database(self):
-        """Setup SQLite database for structured logging"""
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute('''
-                CREATE TABLE IF NOT EXISTS log_events (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    timestamp REAL NOT NULL,
-                    level TEXT NOT NULL,
-                    category TEXT NOT NULL,
-                    message TEXT NOT NULL,
-                    details TEXT,
-                    session_id TEXT,
-                    thread_name TEXT,
-                    module_name TEXT
-                )
-            ''')
-            
-            conn.execute('''
-                CREATE TABLE IF NOT EXISTS performance_events (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    timestamp REAL NOT NULL,
-                    event_type TEXT NOT NULL,
-                    duration REAL,
-                    metadata TEXT,
-                    session_id TEXT
-                )
-            ''')
-            
-            conn.execute('''
-                CREATE TABLE IF NOT EXISTS error_events (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    timestamp REAL NOT NULL,
-                    error_type TEXT NOT NULL,
-                    error_message TEXT NOT NULL,
-                    stack_trace TEXT,
-                    context TEXT,
-                    session_id TEXT
-                )
-            ''')
-            
-            # Create indexes
-            conn.execute('CREATE INDEX IF NOT EXISTS idx_log_timestamp ON log_events(timestamp)')
-            conn.execute('CREATE INDEX IF NOT EXISTS idx_log_category ON log_events(category)')
-            conn.execute('CREATE INDEX IF NOT EXISTS idx_perf_type ON performance_events(event_type)')
-            conn.execute('CREATE INDEX IF NOT EXISTS idx_error_type ON error_events(error_type)')
-            
-    def _setup_file_logging(self):
-        """Setup file-based logging with rotation"""
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        self.current_log_file = self.log_dir / f"webui_{timestamp}.log"
-        
-        # Setup Python logging
-        self.logger = logging.getLogger('LSDAI')
-        self.logger.setLevel(logging.DEBUG)
-        
-        # File handler with rotation
-        file_handler = logging.FileHandler(self.current_log_file)
-        file_handler.setLevel(logging.DEBUG)
-        
-        # Console handler
-        console_handler = logging.StreamHandler()
-        console_handler.setLevel(logging.INFO)
-        
-        # Formatter
-        formatter = logging.Formatter(
-            '%(asctime)s | %(levelname)8s | %(name)s | %(message)s',
-            datefmt='%Y-%m-%d %H:%M:%S'
-        )
-        
-        file_handler.setFormatter(formatter)
-        console_handler.setFormatter(formatter)
-        
-        self.logger.addHandler(file_handler)
-        self.logger.addHandler(console_handler)
-        
-    def _setup_structured_logging(self):
-        """Setup structured logging to database"""
-        self.session_id = f"session_{int(time.time())}"
-        
-    def log_event(self, level, category, message, details=None):
-        """Log structured event"""
-        timestamp = time.time()
-        thread_name = threading.current_thread().name
-        
-        # Log to database
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute('''
-                INSERT INTO log_events 
-                (timestamp, level, category, message, details, session_id, thread_name, module_name)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                timestamp, level, category, message, 
-                json.dumps(details) if details else None,
-                self.session_id, thread_name, __name__
-            ))
-            
-        # Log to file
-        log_level = getattr(logging, level.upper(), logging.INFO)
-        self.logger.log(log_level, f"[{category}] {message}")
-        
-    def log_performance(self, event_type, duration=None, metadata=None):
-        """Log performance event"""
-        timestamp = time.time()
-        
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute('''
-                INSERT INTO performance_events 
-                (timestamp, event_type, duration, metadata, session_id)
-                VALUES (?, ?, ?, ?, ?)
-            ''', (
-                timestamp, event_type, duration,
-                json.dumps(metadata) if metadata else None,
-                self.session_id
-            ))
-            
-        # Update metrics
-        if event_type == 'generation' and duration:
-            self.metrics.record_generation(duration, metadata)
-        elif event_type == 'model_load' and duration:
-            model_name = metadata.get('model_name', 'unknown') if metadata else 'unknown'
-            self.metrics.record_model_load(model_name, duration)
-            
-    def log_error(self, error_type, error_message, stack_trace=None, context=None):
-        """Log error event"""
-        timestamp = time.time()
-        
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute('''
-                INSERT INTO error_events 
-                (timestamp, error_type, error_message, stack_trace, context, session_id)
-                VALUES (?, ?, ?, ?, ?, ?)
-            ''', (
-                timestamp, error_type, error_message, stack_trace,
-                json.dumps(context) if context else None,
-                self.session_id
-            ))
-            
-        # Update metrics
-        self.metrics.record_error(error_type, {'message': error_message, 'context': context})
-        
-        # Log to file
-        self.logger.error(f"[{error_type}] {error_message}")
-        if stack_trace:
-            self.logger.error(f"Stack trace: {stack_trace}")
-            
-    def get_recent_events(self, hours=24, category=None, level=None):
-        """Get recent log events"""
-        since_timestamp = time.time() - (hours * 3600)
-        
-        query = "SELECT * FROM log_events WHERE timestamp >= ?"
-        params = [since_timestamp]
-        
-        if category:
-            query += " AND category = ?"
-            params.append(category)
-            
-        if level:
-            query += " AND level = ?"
-            params.append(level)
-            
-        query += " ORDER BY timestamp DESC LIMIT 1000"
-        
-        with sqlite3.connect(self.db_path) as conn:
-            conn.row_factory = sqlite3.Row
-            cursor = conn.execute(query, params)
-            return [dict(row) for row in cursor.fetchall()]
-            
-    def get_error_summary(self, hours=24):
-        """Get error summary for specified time period"""
-        since_timestamp = time.time() - (hours * 3600)
-        
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.execute('''
-                SELECT error_type, COUNT(*) as count, 
-                       MAX(timestamp) as last_occurrence
-                FROM error_events 
-                WHERE timestamp >= ?
-                GROUP BY error_type
-                ORDER BY count DESC
-            ''', (since_timestamp,))
-            
-            return [
-                {
-                    'error_type': row[0],
-                    'count': row[1],
-                    'last_occurrence': datetime.fromtimestamp(row[2]).isoformat()
-                }
-                for row in cursor.fetchall()
-            ]
-            
-    def get_performance_summary(self, hours=24):
-        """Get performance summary"""
-        since_timestamp = time.time() - (hours * 3600)
-        
-        with sqlite3.connect(self.db_path) as conn:
-            cursor = conn.execute('''
-                SELECT event_type, 
-                       COUNT(*) as count,
-                       AVG(duration) as avg_duration,
-                       MIN(duration) as min_duration,
-                       MAX(duration) as max_duration
-                FROM performance_events 
-                WHERE timestamp >= ? AND duration IS NOT NULL
-                GROUP BY event_type
-            ''', (since_timestamp,))
-            
-            summary = {}
-            for row in cursor.fetchall():
-                summary[row[0]] = {
-                    'count': row[1],
-                    'avg_duration': row[2],
-                    'min_duration': row[3],
-                    'max_duration': row[4]
-                }
-                
-            return summary
-            
-    def export_logs(self, output_path, hours=24, compress=True):
-        """Export logs to file"""
-        since_timestamp = time.time() - (hours * 3600)
-        output_path = Path(output_path)
-        
-        export_data = {
-            'export_timestamp': time.time(),
-            'session_id': self.session_id,
-            'time_range_hours': hours,
-            'events': self.get_recent_events(hours),
-            'errors': self.get_error_summary(hours),
-            'performance': self.get_performance_summary(hours),
-            'metrics': self.metrics.get_statistics()
-        }
-        
-        if compress:
-            with gzip.open(f"{output_path}.gz", 'wt') as f:
-                json.dump(export_data, f, indent=2)
-        else:
-            with open(output_path, 'w') as f:
-                json.dump(export_data, f, indent=2)
-                
-    def cleanup_old_logs(self, days=30):
-        """Clean up old log files and database entries"""
-        cutoff_timestamp = time.time() - (days * 24 * 3600)
-        
-        # Clean database
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute("DELETE FROM log_events WHERE timestamp < ?", (cutoff_timestamp,))
-            conn.execute("DELETE FROM performance_events WHERE timestamp < ?", (cutoff_timestamp,))
-            conn.execute("DELETE FROM error_events WHERE timestamp < ?", (cutoff_timestamp,))
-            conn.execute("VACUUM")  # Reclaim space
-            
-        # Clean old log files
-        cutoff_date = datetime.now() - timedelta(days=days)
-        for log_file in self.log_dir.glob("webui_*.log*"):
-            if log_file.stat().st_mtime < cutoff_date.timestamp():
-                log_file.unlink()
-
-class WebUIMonitor:
-    """Monitor WebUI processes and output for insights"""
-    
-    def __init__(self, logger):
-        self.logger = logger
-        self.patterns = self._compile_patterns()
+    def __init__(self):
         self.monitoring = False
         self.monitor_thread = None
+        self.system_stats = []
+        self.max_stats_history = 1000
         
-    def _compile_patterns(self):
-        """Compile regex patterns for log analysis"""
-        return {
-            'generation_complete': re.compile(r'(\d+) images? created in ([\d.]+)s', re.IGNORECASE),
-            'model_loaded': re.compile(r'Loading .*model (?:from )?(.+?)(?:\s|$)', re.IGNORECASE),
-            'memory_usage': re.compile(r'torch\.cuda\.memory_allocated: ([\d.]+)([KMGT]?B)', re.IGNORECASE),
-            'api_request': re.compile(r'(\w+) /(?:api/)?(\w+)', re.IGNORECASE),
-            'error_occurred': re.compile(r'(error|exception|failed|traceback)', re.IGNORECASE),
-            'startup_time': re.compile(r'Startup time: ([\d.]+)s', re.IGNORECASE),
-            'extension_loaded': re.compile(r'Loading extension: (.+)', re.IGNORECASE)
-        }
+    def start_monitoring(self, interval: float = 5.0):
+        """Start system monitoring"""
+        if self.monitoring:
+            return
         
-    def start_monitoring(self, process):
-        """Start monitoring WebUI process output"""
         self.monitoring = True
-        self.monitor_thread = threading.Thread(
-            target=self._monitor_process,
-            args=(process,),
-            daemon=True
-        )
+        self.monitor_thread = threading.Thread(target=self._monitor_loop, args=(interval,))
+        self.monitor_thread.daemon = True
         self.monitor_thread.start()
-        
-    def stop_monitoring(self):
-        """Stop monitoring"""
-        self.monitoring = False
-        if self.monitor_thread:
-            self.monitor_thread.join(timeout=5)
-            
-    def _monitor_process(self, process):
-        """Monitor process output for interesting events"""
-        while self.monitoring and process.poll() is None:
-            try:
-                line = process.stdout.readline()
-                if not line:
-                    break
-                    
-                line = line.strip()
-                if line:
-                    self._analyze_line(line)
-                    
-            except Exception as e:
-                self.logger.log_error('monitor_error', str(e), traceback.format_exc())
-                
-    def _analyze_line(self, line):
-        """Analyze a line of output for patterns"""
-        try:
-            # Check for generation completion
-            match = self.patterns['generation_complete'].search(line)
-            if match:
-                num_images = int(match.group(1))
-                duration = float(match.group(2))
-                self.logger.log_performance('generation', duration, {
-                    'num_images': num_images,
-                    'avg_per_image': duration / num_images
-                })
-                self.logger.log_event('info', 'generation', f'Generated {num_images} images in {duration}s')
-                return
-                
-            # Check for model loading
-            match = self.patterns['model_loaded'].search(line)
-            if match:
-                model_name = match.group(1)
-                self.logger.log_event('info', 'model', f'Model loaded: {model_name}')
-                return
-                
-            # Check for memory usage
-            match = self.patterns['memory_usage'].search(line)
-            if match:
-                memory_amount = float(match.group(1))
-                memory_unit = match.group(2) or 'B'
-                self.logger.log_event('debug', 'memory', f'CUDA memory: {memory_amount}{memory_unit}')
-                return
-                
-            # Check for API requests
-            match = self.patterns['api_request'].search(line)
-            if match:
-                method = match.group(1)
-                endpoint = match.group(2)
-                self.logger.log_event('debug', 'api', f'{method} /{endpoint}')
-                return
-                
-            # Check for errors
-            match = self.patterns['error_occurred'].search(line)
-            if match:
-                self.logger.log_error('webui_error', line)
-                return
-                
-            # Check for startup time
-            match = self.patterns['startup_time'].search(line)
-            if match:
-                startup_time = float(match.group(1))
-                self.logger.log_performance('startup', startup_time)
-                self.logger.log_event('info', 'startup', f'WebUI started in {startup_time}s')
-                return
-                
-            # Check for extension loading
-            match = self.patterns['extension_loaded'].search(line)
-            if match:
-                extension_name = match.group(1)
-                self.logger.log_event('info', 'extension', f'Extension loaded: {extension_name}')
-                return
-                
-        except Exception as e:
-            # Don't log errors for pattern matching failures
-            pass
-
-class SystemResourceMonitor:
-    """Monitor system resources during WebUI operation"""
+        print("📊 System monitoring started")
     
-    def __init__(self, logger):
-        self.logger = logger
-        self.monitoring = False
-        self.monitor_thread = None
-        self.interval = 30  # seconds
-        
-    def start_monitoring(self):
-        """Start resource monitoring"""
-        self.monitoring = True
-        self.monitor_thread = threading.Thread(
-            target=self._monitor_resources,
-            daemon=True
-        )
-        self.monitor_thread.start()
-        
     def stop_monitoring(self):
-        """Stop resource monitoring"""
+        """Stop system monitoring"""
         self.monitoring = False
         if self.monitor_thread:
-            self.monitor_thread.join(timeout=5)
-            
-    def _monitor_resources(self):
-        """Monitor system resources"""
+            self.monitor_thread.join(timeout=1)
+        print("📊 System monitoring stopped")
+    
+    def _monitor_loop(self, interval: float):
+        """Main monitoring loop"""
         while self.monitoring:
             try:
-                # CPU and Memory
-                cpu_percent = psutil.cpu_percent(interval=1)
-                memory = psutil.virtual_memory()
+                stats = self.get_current_stats()
+                self.system_stats.append(stats)
                 
-                self.logger.metrics.record_memory_usage(memory.percent)
+                # Keep only recent stats
+                if len(self.system_stats) > self.max_stats_history:
+                    self.system_stats = self.system_stats[-self.max_stats_history:]
                 
-                # GPU (if available)
-                try:
-                    import GPUtil
-                    gpus = GPUtil.getGPUs()
-                    if gpus:
-                        gpu = gpus[0]
-                        self.logger.metrics.record_gpu_usage(
-                            gpu.load * 100,
-                            gpu.temperature
-                        )
-                        
-                        vram_used_mb = gpu.memoryUsed
-                        self.logger.metrics.record_memory_usage(
-                            memory.percent,
-                            vram_used_mb
-                        )
-                        
-                except ImportError:
-                    pass
-                    
-                # Log resource summary periodically
-                if int(time.time()) % 300 == 0:  # Every 5 minutes
-                    self.logger.log_event('info', 'resources', 
-                        f'CPU: {cpu_percent:.1f}%, RAM: {memory.percent:.1f}%'
-                    )
-                    
-                time.sleep(self.interval)
+                time.sleep(interval)
+            except Exception as e:
+                print(f"Monitoring error: {e}")
+                time.sleep(interval)
+    
+    def get_current_stats(self) -> Dict[str, Any]:
+        """Get current system statistics"""
+        try:
+            # CPU stats
+            cpu_percent = psutil.cpu_percent(interval=1)
+            cpu_count = psutil.cpu_count()
+            
+            # Memory stats
+            memory = psutil.virtual_memory()
+            
+            # Disk stats
+            disk = psutil.disk_usage('/')
+            
+            # GPU stats (if available)
+            gpu_stats = self._get_gpu_stats()
+            
+            return {
+                'timestamp': datetime.now().isoformat(),
+                'cpu': {
+                    'percent': cpu_percent,
+                    'count': cpu_count,
+                    'per_core': psutil.cpu_percent(percpu=True)
+                },
+                'memory': {
+                    'total': memory.total,
+                    'available': memory.available,
+                    'percent': memory.percent,
+                    'used': memory.used
+                },
+                'disk': {
+                    'total': disk.total,
+                    'used': disk.used,
+                    'free': disk.free,
+                    'percent': (disk.used / disk.total) * 100
+                },
+                'gpu': gpu_stats
+            }
+        except Exception as e:
+            return {
+                'timestamp': datetime.now().isoformat(),
+                'error': str(e)
+            }
+    
+    def _get_gpu_stats(self) -> Dict[str, Any]:
+        """Get GPU statistics if available"""
+        try:
+            # Try nvidia-smi
+            result = subprocess.run([
+                'nvidia-smi', '--query-gpu=memory.used,memory.total,utilization.gpu,temperature.gpu',
+                '--format=csv,noheader,nounits'
+            ], capture_output=True, text=True, timeout=5)
+            
+            if result.returncode == 0:
+                lines = result.stdout.strip().split('\n')
+                gpus = []
+                
+                for i, line in enumerate(lines):
+                    parts = line.split(', ')
+                    if len(parts) >= 4:
+                        gpus.append({
+                            'id': i,
+                            'memory_used': int(parts[0]),
+                            'memory_total': int(parts[1]),
+                            'utilization': int(parts[2]),
+                            'temperature': int(parts[3])
+                        })
+                
+                return {'nvidia': gpus, 'available': True}
+            else:
+                return {'available': False, 'error': 'nvidia-smi not available'}
+                
+        except Exception as e:
+            return {'available': False, 'error': str(e)}
+    
+    def get_stats_summary(self, minutes: int = 60) -> Dict[str, Any]:
+        """Get summary of stats for the last N minutes"""
+        if not self.system_stats:
+            return {'error': 'No stats available'}
+        
+        cutoff_time = datetime.now() - timedelta(minutes=minutes)
+        recent_stats = [
+            stat for stat in self.system_stats 
+            if datetime.fromisoformat(stat['timestamp']) > cutoff_time
+        ]
+        
+        if not recent_stats:
+            return {'error': 'No recent stats available'}
+        
+        # Calculate averages
+        cpu_values = [stat['cpu']['percent'] for stat in recent_stats if 'cpu' in stat]
+        memory_values = [stat['memory']['percent'] for stat in recent_stats if 'memory' in stat]
+        
+        return {
+            'timeframe_minutes': minutes,
+            'sample_count': len(recent_stats),
+            'cpu': {
+                'average': sum(cpu_values) / len(cpu_values) if cpu_values else 0,
+                'max': max(cpu_values) if cpu_values else 0,
+                'min': min(cpu_values) if cpu_values else 0
+            },
+            'memory': {
+                'average': sum(memory_values) / len(memory_values) if memory_values else 0,
+                'max': max(memory_values) if memory_values else 0,
+                'min': min(memory_values) if memory_values else 0
+            },
+            'latest': recent_stats[-1] if recent_stats else {}
+        }
+
+class AdvancedLogger:
+    """Advanced logging system with multiple output formats and levels"""
+    
+    def __init__(self, log_name: str = "lsdai"):
+        self.log_name = log_name
+        self.log_file = LOGS_PATH / f"{log_name}.log"
+        self.json_log_file = LOGS_PATH / f"{log_name}.json"
+        self.max_log_size = 10 * 1024 * 1024  # 10MB
+        self.max_json_entries = 10000
+        
+        # Ensure logs directory exists
+        LOGS_PATH.mkdir(parents=True, exist_ok=True)
+        
+        # Initialize log files
+        self._init_log_files()
+    
+    def _init_log_files(self):
+        """Initialize log files if they don't exist"""
+        if not self.log_file.exists():
+            self.log_file.touch()
+        
+        if not self.json_log_file.exists():
+            initial_data = {
+                'log_name': self.log_name,
+                'created': datetime.now().isoformat(),
+                'entries': []
+            }
+            with open(self.json_log_file, 'w') as f:
+                json.dump(initial_data, f, indent=2)
+    
+    def _rotate_log_if_needed(self):
+        """Rotate log file if it gets too large"""
+        try:
+            if self.log_file.exists() and self.log_file.stat().st_size > self.max_log_size:
+                # Rotate log file
+                backup_file = self.log_file.with_suffix('.log.old')
+                if backup_file.exists():
+                    backup_file.unlink()
+                self.log_file.rename(backup_file)
+                self.log_file.touch()
+        except Exception as e:
+            print(f"Log rotation error: {e}")
+    
+    def log(self, level: str, message: str, category: str = "general", extra_data: Dict = None):
+        """Log a message with specified level"""
+        timestamp = datetime.now()
+        
+        # Format for text log
+        text_entry = f"[{timestamp.strftime('%Y-%m-%d %H:%M:%S')}] [{level.upper()}] [{category}] {message}"
+        
+        # Write to text log
+        try:
+            self._rotate_log_if_needed()
+            with open(self.log_file, 'a', encoding='utf-8') as f:
+                f.write(text_entry + '\n')
+        except Exception as e:
+            print(f"Text log write error: {e}")
+        
+        # Prepare JSON entry
+        json_entry = {
+            'timestamp': timestamp.isoformat(),
+            'level': level.upper(),
+            'category': category,
+            'message': message
+        }
+        
+        if extra_data:
+            json_entry['extra'] = extra_data
+        
+        # Write to JSON log
+        try:
+            # Read existing JSON log
+            with open(self.json_log_file, 'r') as f:
+                log_data = json.load(f)
+            
+            # Add new entry
+            log_data['entries'].append(json_entry)
+            
+            # Keep only recent entries
+            if len(log_data['entries']) > self.max_json_entries:
+                log_data['entries'] = log_data['entries'][-self.max_json_entries:]
+            
+            # Write back
+            with open(self.json_log_file, 'w') as f:
+                json.dump(log_data, f, indent=2)
+                
+        except Exception as e:
+            print(f"JSON log write error: {e}")
+        
+        # Also print to console for immediate feedback
+        print(text_entry)
+    
+    def info(self, message: str, category: str = "general", extra_data: Dict = None):
+        """Log info message"""
+        self.log("info", message, category, extra_data)
+    
+    def warning(self, message: str, category: str = "general", extra_data: Dict = None):
+        """Log warning message"""
+        self.log("warning", message, category, extra_data)
+    
+    def error(self, message: str, category: str = "general", extra_data: Dict = None):
+        """Log error message"""
+        self.log("error", message, category, extra_data)
+    
+    def debug(self, message: str, category: str = "general", extra_data: Dict = None):
+        """Log debug message"""
+        self.log("debug", message, category, extra_data)
+    
+    def success(self, message: str, category: str = "general", extra_data: Dict = None):
+        """Log success message"""
+        self.log("success", message, category, extra_data)
+    
+    def log_system_info(self):
+        """Log comprehensive system information"""
+        self.info("Logging system information", "system")
+        
+        # Platform info
+        system_info = {
+            'platform': platform.platform(),
+            'system': platform.system(),
+            'release': platform.release(),
+            'version': platform.version(),
+            'machine': platform.machine(),
+            'processor': platform.processor(),
+            'python_version': platform.python_version()
+        }
+        
+        self.info("System platform information", "system", system_info)
+        
+        # CPU info
+        try:
+            cpu_info = {
+                'physical_cores': psutil.cpu_count(logical=False),
+                'total_cores': psutil.cpu_count(logical=True),
+                'max_frequency': psutil.cpu_freq().max if psutil.cpu_freq() else None,
+                'current_frequency': psutil.cpu_freq().current if psutil.cpu_freq() else None
+            }
+            self.info("CPU information", "system", cpu_info)
+        except Exception as e:
+            self.error(f"Could not get CPU info: {e}", "system")
+        
+        # Memory info
+        try:
+            memory = psutil.virtual_memory()
+            memory_info = {
+                'total_gb': round(memory.total / (1024**3), 2),
+                'available_gb': round(memory.available / (1024**3), 2),
+                'percent_used': memory.percent
+            }
+            self.info("Memory information", "system", memory_info)
+        except Exception as e:
+            self.error(f"Could not get memory info: {e}", "system")
+        
+        # Disk info
+        try:
+            disk = psutil.disk_usage('/')
+            disk_info = {
+                'total_gb': round(disk.total / (1024**3), 2),
+                'used_gb': round(disk.used / (1024**3), 2),
+                'free_gb': round(disk.free / (1024**3), 2),
+                'percent_used': round((disk.used / disk.total) * 100, 2)
+            }
+            self.info("Disk information", "system", disk_info)
+        except Exception as e:
+            self.error(f"Could not get disk info: {e}", "system")
+        
+        # Environment info
+        env_info = {
+            'home_path': os.environ.get('home_path', 'Not set'),
+            'scr_path': os.environ.get('scr_path', 'Not set'),
+            'venv_path': os.environ.get('venv_path', 'Not set'),
+            'colab_detected': 'COLAB_GPU' in os.environ,
+            'kaggle_detected': 'KAGGLE_URL_BASE' in os.environ
+        }
+        self.info("Environment information", "system", env_info)
+    
+    def log_download_event(self, url: str, filename: str, success: bool, size: Optional[int] = None, error: Optional[str] = None):
+        """Log download event"""
+        extra_data = {
+            'url': url,
+            'filename': filename,
+            'success': success
+        }
+        
+        if size:
+            extra_data['size_bytes'] = size
+            extra_data['size_mb'] = round(size / (1024**2), 2)
+        
+        if error:
+            extra_data['error'] = error
+        
+        if success:
+            self.success(f"Downloaded: {filename}", "download", extra_data)
+        else:
+            self.error(f"Download failed: {filename}", "download", extra_data)
+    
+    def log_webui_event(self, event: str, webui_type: str, details: Optional[Dict] = None):
+        """Log WebUI-related event"""
+        extra_data = {'webui_type': webui_type}
+        if details:
+            extra_data.update(details)
+        
+        self.info(f"WebUI {event}", "webui", extra_data)
+    
+    def get_recent_logs(self, level: Optional[str] = None, category: Optional[str] = None, count: int = 100) -> List[Dict]:
+        """Get recent log entries with optional filtering"""
+        try:
+            with open(self.json_log_file, 'r') as f:
+                log_data = json.load(f)
+            
+            entries = log_data.get('entries', [])
+            
+            # Apply filters
+            if level:
+                entries = [e for e in entries if e.get('level', '').lower() == level.lower()]
+            
+            if category:
+                entries = [e for e in entries if e.get('category', '').lower() == category.lower()]
+            
+            # Return most recent entries
+            return entries[-count:]
+            
+        except Exception as e:
+            print(f"Error reading log entries: {e}")
+            return []
+    
+    def clear_logs(self):
+        """Clear all log files"""
+        try:
+            self.log_file.unlink(missing_ok=True)
+            self.json_log_file.unlink(missing_ok=True)
+            self._init_log_files()
+            self.info("Log files cleared", "system")
+        except Exception as e:
+            self.error(f"Error clearing logs: {e}", "system")
+
+class WebUIMonitor:
+    """Monitor WebUI processes and performance"""
+    
+    def __init__(self, logger: AdvancedLogger):
+        self.logger = logger
+        self.monitoring = False
+        self.monitor_thread = None
+        self.webui_process = None
+        self.webui_stats = []
+    
+    def start_monitoring(self, process_name: str = "python"):
+        """Start monitoring WebUI process"""
+        if self.monitoring:
+            return
+        
+        self.monitoring = True
+        self.monitor_thread = threading.Thread(target=self._monitor_webui, args=(process_name,))
+        self.monitor_thread.daemon = True
+        self.monitor_thread.start()
+        
+        self.logger.info(f"Started WebUI monitoring for process: {process_name}", "webui")
+    
+    def stop_monitoring(self):
+        """Stop WebUI monitoring"""
+        self.monitoring = False
+        if self.monitor_thread:
+            self.monitor_thread.join(timeout=1)
+        
+        self.logger.info("Stopped WebUI monitoring", "webui")
+    
+    def _monitor_webui(self, process_name: str):
+        """Monitor WebUI process"""
+        while self.monitoring:
+            try:
+                # Find WebUI process
+                webui_processes = []
+                for proc in psutil.process_iter(['pid', 'name', 'memory_info', 'cpu_percent']):
+                    try:
+                        if process_name in proc.info['name'].lower():
+                            webui_processes.append(proc)
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        continue
+                
+                if webui_processes:
+                    for proc in webui_processes:
+                        try:
+                            stats = {
+                                'timestamp': datetime.now().isoformat(),
+                                'pid': proc.pid,
+                                'memory_mb': round(proc.memory_info().rss / (1024**2), 2),
+                                'cpu_percent': proc.cpu_percent()
+                            }
+                            self.webui_stats.append(stats)
+                        except (psutil.NoSuchProcess, psutil.AccessDenied):
+                            continue
+                
+                # Keep only recent stats
+                if len(self.webui_stats) > 1000:
+                    self.webui_stats = self.webui_stats[-1000:]
+                
+                time.sleep(10)  # Check every 10 seconds
                 
             except Exception as e:
-                self.logger.log_error('resource_monitor_error', str(e))
-                time.sleep(self.interval)
+                self.logger.error(f"WebUI monitoring error: {e}", "webui")
+                time.sleep(10)
 
-# Global logger instance
-advanced_logger = None
+# Global instances
+_system_monitor = SystemMonitor()
+_advanced_logger = AdvancedLogger()
+_webui_monitor = WebUIMonitor(_advanced_logger)
 
-def get_advanced_logger():
-    """Get or create advanced logger instance"""
-    global advanced_logger
-    
-    if advanced_logger is None:
-        advanced_logger = AdvancedLogger()
-        
-    return advanced_logger
+# Convenience functions
+def get_advanced_logger(name: str = "lsdai") -> AdvancedLogger:
+    """Get advanced logger instance"""
+    if name == "lsdai":
+        return _advanced_logger
+    else:
+        return AdvancedLogger(name)
 
-def setup_webui_monitoring(process):
-    """Setup complete monitoring for WebUI process"""
-    logger = get_advanced_logger()
-    
-    # Start WebUI output monitoring
-    webui_monitor = WebUIMonitor(logger)
-    webui_monitor.start_monitoring(process)
-    
-    # Start resource monitoring
-    resource_monitor = SystemResourceMonitor(logger)
-    resource_monitor.start_monitoring()
-    
-    logger.log_event('info', 'monitoring', 'WebUI monitoring started')
-    
-    return logger, webui_monitor, resource_monitor
+def get_system_monitor() -> SystemMonitor:
+    """Get system monitor instance"""
+    return _system_monitor
 
-print("Advanced Logging and Monitoring System loaded!")
+def setup_webui_monitoring(process_name: str = "python"):
+    """Setup WebUI monitoring"""
+    _webui_monitor.start_monitoring(process_name)
+
+def stop_webui_monitoring():
+    """Stop WebUI monitoring"""
+    _webui_monitor.stop_monitoring()
+
+def start_system_monitoring(interval: float = 5.0):
+    """Start system monitoring"""
+    _system_monitor.start_monitoring(interval)
+
+def stop_system_monitoring():
+    """Stop system monitoring"""
+    _system_monitor.stop_monitoring()
+
+def log_system_startup():
+    """Log system startup information"""
+    _advanced_logger.log_system_info()
+    _advanced_logger.info("LSDAI system started", "system")
+
+def log_system_shutdown():
+    """Log system shutdown"""
+    _advanced_logger.info("LSDAI system shutdown", "system")
+
+# Export main classes and functions
+__all__ = [
+    'AdvancedLogger', 'SystemMonitor', 'WebUIMonitor',
+    'get_advanced_logger', 'get_system_monitor',
+    'setup_webui_monitoring', 'stop_webui_monitoring',
+    'start_system_monitoring', 'stop_system_monitoring',
+    'log_system_startup', 'log_system_shutdown'
+]
