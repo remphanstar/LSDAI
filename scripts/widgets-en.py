@@ -1,4 +1,4 @@
-# ~~ widgets.py | by ANXETY - FIXED VERSION ~
+# ~ widgets.py | by ANXETY - FIXED VERSION ~
 
 from widget_factory import WidgetFactory        # WIDGETS
 from webui_utils import update_current_webui    # WEBUI
