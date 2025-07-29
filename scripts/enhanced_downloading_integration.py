@@ -21,6 +21,10 @@ import time
 from pathlib import Path
 import json
 
+# --- ADDED PLATFORM CHECK AND VENV DEPENDENCY INSTALL ---
+IS_DEBIAN = os.path.exists('/etc/debian_version')
+# --- END ADDITION ---
+
 # Setup environment paths
 HOME = Path(os.environ.get('home_path', '/content'))
 SCR_PATH = Path(os.environ.get('scr_path', HOME / 'LSDAI'))
@@ -53,6 +57,18 @@ print("\n🐍 1. Setting up Virtual Environment...")
 print(f"   - Target Venv Path: {VENV_PATH}")
 
 try:
+    # --- ADDED VENV DEPENDENCY INSTALL FALLBACK ---
+    if IS_DEBIAN and not VENV_PATH.exists():
+        print("   - Debian-based system detected. Ensuring python3-venv is installed as a fallback.")
+        try:
+            # Using subprocess for cleaner execution and error handling
+            subprocess.run(['apt-get', 'update', '-qq'], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+            subprocess.run(['apt-get', 'install', '-y', '-qq', 'python3-venv'], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+            print("     ✅ python3-venv installed or already present.")
+        except (subprocess.CalledProcessError, FileNotFoundError) as e:
+            print(f"   - ⚠️  Could not install python3-venv via apt-get. This may cause issues if it's not already present. Error: {e.stderr.decode() if hasattr(e, 'stderr') and e.stderr else e}")
+    # --- END ADDITION ---
+
     if not VENV_PATH.exists():
         print("   - Creating venv directory...")
         VENV_PATH.mkdir(parents=True, exist_ok=True)
@@ -65,7 +81,7 @@ try:
         pip_path = VENV_PATH / 'bin' / 'pip' if os.name != 'nt' else VENV_PATH / 'Scripts' / 'pip.exe'
         
         print("   - Downloading get-pip.py...")
-        get_ipython().system('wget -q https://bootstrap.pypa.io/get-pip.py -O /tmp/get-pip.py')
+        get_ipython().system('curl -sLo /tmp/get-pip.py https://bootstrap.pypa.io/get-pip.py')
         
         print("   - Installing pip into the virtual environment...")
         python_path = VENV_PATH / 'bin' / 'python' if os.name != 'nt' else VENV_PATH / 'Scripts' / 'python.exe'
