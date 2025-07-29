@@ -3,6 +3,10 @@ import json_utils as js
 from pathlib import Path
 import ipywidgets as widgets
 from IPython.display import display, HTML, Javascript
+import os
+
+# Get settings path from environment or default
+SETTINGS_PATH = Path(os.environ.get('settings_path', '/content/LSDAI/settings.json'))
 
 # Import original widget factory
 try:
@@ -106,13 +110,13 @@ class IntegratedWidgetSystem:
         
         # XL Models toggle (original functionality)
         xl_toggle = widgets.ToggleButton(
-            value=js.read_key('XL_models', False),
+            value=js.read(SETTINGS_PATH, 'XL_models', False),
             description='SDXL Models',
             button_style='info'
         )
         
         def on_xl_toggle_change(change):
-            js.write_key('XL_models', change['new'])
+            js.save(SETTINGS_PATH, 'XL_models', change['new'])
             # Trigger enhanced model manager update
             if hasattr(self.enhanced_manager, 'update_model_filter'):
                 self.enhanced_manager.update_model_filter('xl_models', change['new'])
@@ -124,12 +128,12 @@ class IntegratedWidgetSystem:
         webui_options = ['automatic1111', 'ComfyUI', 'InvokeAI', 'StableSwarmUI']
         webui_dropdown = widgets.Dropdown(
             options=webui_options,
-            value=js.read_key('change_webui', 'automatic1111'),
+            value=js.read(SETTINGS_PATH, 'change_webui', 'automatic1111'),
             description='WebUI:'
         )
         
         def on_webui_change(change):
-            js.write_key('change_webui', change['new'])
+            js.save(SETTINGS_PATH, 'change_webui', change['new'])
             # Update enhanced launcher
             if hasattr(self.enhanced_manager, 'update_webui_selection'):
                 self.enhanced_manager.update_webui_selection(change['new'])
@@ -139,13 +143,13 @@ class IntegratedWidgetSystem:
         
         # Command line arguments (enhanced with suggestions)
         args_text = widgets.Textarea(
-            value=js.read_key('commandline_arguments', ''),
+            value=js.read(SETTINGS_PATH, 'commandline_arguments', ''),
             description='Arguments:',
             placeholder='--xformers --opt-channelslast'
         )
         
         def on_args_change(change):
-            js.write_key('commandline_arguments', change['new'])
+            js.save(SETTINGS_PATH, 'commandline_arguments', change['new'])
             
         args_text.observe(on_args_change, names='value')
         compatibility_widgets.append(args_text)
@@ -190,7 +194,7 @@ class IntegratedWidgetSystem:
         
         # XL Models toggle
         xl_toggle = widgets.ToggleButton(
-            value=js.read_key('XL_models', False),
+            value=js.read(SETTINGS_PATH, 'XL_models', False),
             description='SDXL Models',
             button_style='info',
             layout=widgets.Layout(width='200px')
@@ -199,7 +203,7 @@ class IntegratedWidgetSystem:
         
         # Model selection
         model_text = widgets.Text(
-            value=js.read_key('model', ''),
+            value=js.read(SETTINGS_PATH, 'model', ''),
             description='Model URL:',
             placeholder='https://civitai.com/api/download/models/...',
             layout=widgets.Layout(width='100%')
@@ -208,7 +212,7 @@ class IntegratedWidgetSystem:
         
         # VAE selection  
         vae_text = widgets.Text(
-            value=js.read_key('vae', ''),
+            value=js.read(SETTINGS_PATH, 'vae', ''),
             description='VAE URL:',
             placeholder='https://huggingface.co/...',
             layout=widgets.Layout(width='100%')
@@ -222,7 +226,7 @@ class IntegratedWidgetSystem:
         # WebUI selection
         webui_dropdown = widgets.Dropdown(
             options=['automatic1111', 'ComfyUI', 'InvokeAI', 'StableSwarmUI'],
-            value=js.read_key('change_webui', 'automatic1111'),
+            value=js.read(SETTINGS_PATH, 'change_webui', 'automatic1111'),
             description='WebUI:',
             layout=widgets.Layout(width='300px')
         )
@@ -230,7 +234,7 @@ class IntegratedWidgetSystem:
         
         # Extensions
         extensions_toggle = widgets.ToggleButton(
-            value=js.read_key('latest_extensions', True),
+            value=js.read(SETTINGS_PATH, 'latest_extensions', True),
             description='Latest Extensions',
             button_style='success',
             layout=widgets.Layout(width='200px')
@@ -243,7 +247,7 @@ class IntegratedWidgetSystem:
         
         # Command line arguments
         args_text = widgets.Textarea(
-            value=js.read_key('commandline_arguments', ''),
+            value=js.read(SETTINGS_PATH, 'commandline_arguments', ''),
             description='Launch Args:',
             placeholder='--xformers --api --listen --port 7860',
             layout=widgets.Layout(width='100%', height='100px')
@@ -256,7 +260,7 @@ class IntegratedWidgetSystem:
         
         # Civitai token
         civitai_token = widgets.Password(
-            value=js.read_key('civitai_token', ''),
+            value=js.read(SETTINGS_PATH, 'civitai_token', ''),
             description='Civitai Token:',
             placeholder='Your Civitai API token',
             layout=widgets.Layout(width='100%')
@@ -265,7 +269,7 @@ class IntegratedWidgetSystem:
         
         # HuggingFace token
         hf_token = widgets.Password(
-            value=js.read_key('huggingface_token', ''),
+            value=js.read(SETTINGS_PATH, 'huggingface_token', ''),
             description='HF Token:',
             placeholder='Your HuggingFace token',
             layout=widgets.Layout(width='100%')
@@ -287,14 +291,14 @@ class IntegratedWidgetSystem:
         # Set up change handlers
         def save_all_settings(b=None):
             try:
-                js.write_key('XL_models', xl_toggle.value)
-                js.write_key('model', model_text.value)
-                js.write_key('vae', vae_text.value)
-                js.write_key('change_webui', webui_dropdown.value)
-                js.write_key('latest_extensions', extensions_toggle.value)
-                js.write_key('commandline_arguments', args_text.value)
-                js.write_key('civitai_token', civitai_token.value)
-                js.write_key('huggingface_token', hf_token.value)
+                js.save(SETTINGS_PATH, 'XL_models', xl_toggle.value)
+                js.save(SETTINGS_PATH, 'model', model_text.value)
+                js.save(SETTINGS_PATH, 'vae', vae_text.value)
+                js.save(SETTINGS_PATH, 'change_webui', webui_dropdown.value)
+                js.save(SETTINGS_PATH, 'latest_extensions', extensions_toggle.value)
+                js.save(SETTINGS_PATH, 'commandline_arguments', args_text.value)
+                js.save(SETTINGS_PATH, 'civitai_token', civitai_token.value)
+                js.save(SETTINGS_PATH, 'huggingface_token', hf_token.value)
                 
                 with status_output:
                     status_output.clear_output()
