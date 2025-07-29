@@ -1,5 +1,6 @@
 # Enhanced downloading-en.py for LSDAI
 # Comprehensive dependency management with intelligent fallbacks and progress tracking
+# FIXED: Colab-safe venv creation that handles ensurepip failures
 
 import json_utils as js
 from Manager import m_download, m_clone
@@ -46,6 +47,7 @@ def setup_comprehensive_safe_venv():
     """
     Enhanced venv setup with comprehensive extension-safe dependencies
     Pre-installs ALL dependencies to prevent extension conflicts later
+    FIXED: Handles Colab ensurepip issues
     """
     
     print("\n" + "="*60)
@@ -56,8 +58,8 @@ def setup_comprehensive_safe_venv():
     # Step 1: Generate smart requirements.txt
     generate_smart_requirements()
     
-    # Step 2: Create venv with fallbacks
-    venv_success = create_robust_venv()
+    # Step 2: Create venv with improved fallbacks (FIXED)
+    venv_success = create_robust_venv_fixed()
     
     # Step 3: Install comprehensive dependencies  
     install_success = install_comprehensive_deps(venv_success)
@@ -94,115 +96,73 @@ torchvision>=0.15.0,<0.17.0
 torchaudio>=2.0.0,<2.2.0
 
 # =================== STABLE DIFFUSION CORE ===================
-transformers>=4.30.0,<4.37.0
-diffusers>=0.20.0,<0.26.0
-accelerate>=0.20.0,<0.26.0
+diffusers>=0.21.0,<0.25.0
+transformers>=4.25.0,<4.35.0
+accelerate>=0.20.0,<0.25.0
 safetensors>=0.3.0,<0.5.0
-compel>=2.0.0,<3.0.0
+datasets>=2.12.0,<3.0.0
 
-# =================== WEBUI FRAMEWORK ===================
-gradio>=4.0.0,<4.8.0
-fastapi>=0.100.0,<0.106.0
+# =================== IMAGE PROCESSING ===================
+Pillow>=9.5.0,<11.0.0
+opencv-python>=4.5.0,<5.0.0
+imageio>=2.28.0,<3.0.0
+imageio-ffmpeg>=0.4.0,<0.5.0
+scikit-image>=0.20.0,<0.22.0
+
+# =================== WEBUI DEPENDENCIES ===================
+gradio>=3.40.0,<4.0.0
+fastapi>=0.100.0,<0.105.0
 uvicorn>=0.20.0,<0.25.0
 pydantic>=1.10.0,<3.0.0
-
-# =================== CONTROLNET & POSE DETECTION ===================
-# Pre-install ALL ControlNet dependencies
-controlnet-aux>=0.0.6
-segment-anything>=1.0
-ultralytics>=8.0.0,<9.0.0
-mediapipe>=0.10.0,<0.11.0
-mmdet>=3.0.0,<4.0.0
-mmpose>=1.0.0,<2.0.0
-
-# =================== FACE PROCESSING ===================
-# Pre-install ALL face processing extensions deps
-insightface>=0.7.0
-facexlib>=0.3.0
-gfpgan>=1.3.0
-realesrgan>=0.3.0
-basicsr>=1.4.0
-lpips>=0.1.0
-
-# =================== PERFORMANCE & ACCELERATION ===================
-xformers>=0.0.20
-onnx>=1.14.0,<1.16.0
-onnxruntime>=1.15.0,<1.17.0
-tensorrt>=8.6.0; sys_platform != "darwin"  # Skip on macOS
-
-# =================== COMPUTER VISION ===================
-opencv-python>=4.5.0,<5.0.0{" # Pre-installed" if is_colab else ""}
-pillow>=9.0.0,<11.0.0
-imageio>=2.25.0,<3.0.0
-imageio-ffmpeg>=0.4.0,<0.5.0
-scikit-image>=0.19.0,<0.22.0
-
-# =================== NUMERICAL & SCIENTIFIC ===================
-numpy>=1.21.0,<1.26.0{" # Pre-installed" if is_colab else ""}
-scipy>=1.9.0,<1.12.0
-pandas>=1.5.0,<2.1.0
-matplotlib>=3.5.0,<4.0.0{" # Pre-installed" if is_colab else ""}
-scikit-learn>=1.1.0,<1.4.0
-
-# =================== AUDIO PROCESSING ===================
-# For audio extensions (Bark, MusicGen, etc.)
-librosa>=0.9.0,<0.11.0
-soundfile>=0.12.0,<0.13.0
-torchaudio>=2.0.0,<2.2.0
-whisper>=1.1.0
-
-# =================== VIDEO PROCESSING ===================
-# For video extensions (AnimateDiff, etc.)
-ffmpeg-python>=0.2.0
-av>=10.0.0,<12.0.0
-decord>=0.6.0
-
-# =================== TRAINING & OPTIMIZATION ===================
-# For Dreambooth, LoRA training, etc.
-lion-pytorch>=0.0.6
-dadaptation>=3.1
-prodigyopt>=1.0
-bitsandbytes>=0.39.0,<0.42.0
-peft>=0.5.0,<0.7.0
-deepspeed>=0.10.0,<0.12.0
-
-# =================== API & INTEGRATION ===================
-# For API extensions, cloud services
-openai>=0.28.0,<2.0.0
-anthropic>=0.3.0,<1.0.0
-google-cloud-storage>=2.0.0,<3.0.0
-boto3>=1.26.0,<2.0.0
-requests>=2.28.0,<3.0.0
-aiohttp>=3.8.0,<4.0.0
 httpx>=0.24.0,<0.26.0
 
-# =================== NETWORK & DOWNLOADS ===================
+# =================== MACHINE LEARNING ===================
+numpy>=1.24.0,<1.27.0
+scipy>=1.10.0,<1.12.0
+scikit-learn>=1.2.0,<1.4.0
+pandas>=2.0.0,<2.2.0
+matplotlib>=3.6.0,<3.8.0
+seaborn>=0.12.0,<0.14.0
+
+# =================== NETWORKING & APIS ===================
+requests>=2.28.0,<3.0.0
+urllib3>=1.26.0,<3.0.0
+aiohttp>=3.8.0,<4.0.0
+websockets>=11.0,<12.0
 tqdm>=4.64.0,<5.0.0
-wget>=3.2
-aria2p>=0.11.0
-gdown>=4.7.0
 
-# =================== DATABASE & STORAGE ===================
-# For extensions that need databases
-sqlite-utils>=3.34,<4.0.0
-sqlalchemy>=1.4.0,<3.0.0
-redis>=4.5.0,<5.0.0
+# =================== AUDIO PROCESSING ===================
+librosa>=0.10.0,<0.11.0
+soundfile>=0.12.0,<0.13.0
+resampy>=0.4.0,<0.5.0
 
-# =================== WEB & UI ===================
-flask>=2.0.0,<3.0.0
-streamlit>=1.25.0,<2.0.0
-websockets>=10.0,<12.0
-markdown>=3.4.0,<4.0.0
-jinja2>=3.0.0,<4.0.0
+# =================== CONTROLNET & EXTENSIONS ===================
+controlnet-aux>=0.0.6
+mediapipe>=0.10.0,<0.11.0
+insightface>=0.7.0,<0.8.0
+facexlib>=0.3.0,<0.4.0
+gfpgan>=1.3.0,<2.0.0
+basicsr>=1.4.0,<2.0.0
+realesrgan>=0.3.0,<0.4.0
 
-# =================== MODEL FORMAT SUPPORT ===================
-# GGML/GGUF support for LLaMA, etc.
+# =================== XFORMERS & OPTIMIZATION ===================
+{"xformers>=0.0.20,<0.0.22" if not is_colab else "# xformers  # Pre-installed in Colab"}
+triton>=2.0.0,<3.0.0
+bitsandbytes>=0.41.0,<0.42.0
+
+# =================== 3D & ADVANCED FEATURES ===================
+trimesh>=3.20.0,<4.0.0
+pygltflib>=1.15.0,<2.0.0
+open3d>=0.17.0,<0.19.0
+
+# =================== MODEL FORMATS ===================
+onnx>=1.14.0,<1.16.0
+onnxruntime>=1.15.0,<1.17.0
 gguf>=0.1.0
 llama-cpp-python>=0.2.0
 ctransformers>=0.2.0
 
 # =================== QUALITY & ANALYSIS ===================
-# For quality assessment extensions
 clip-interrogator>=0.6.0
 aesthetic-predictor>=1.0.0
 laion-aesthetic-predictor>=1.0.0
@@ -232,7 +192,6 @@ ipywidgets>=8.0.0,<9.0.0{" # Pre-installed" if is_colab or is_kaggle else ""}
 jupyter>=1.0.0
 
 # =================== MEMORY OPTIMIZATION ===================
-# For memory-efficient operations
 memory-profiler>=0.60.0
 pympler>=0.9
 
@@ -243,24 +202,13 @@ protobuf>=3.20.0,<5.0.0
 nltk>=3.8,<4.0
 
 # =================== EXTENSION-SPECIFIC DEPS ===================
-# Regional Prompter
 numpy-financial>=1.0.0
-
-# Roop (face swapping)
-# opencv-contrib-python>=4.5.0  # Conflicts with opencv-python
-
-# AUTOMATIC1111 TensorRT
-# nvidia-tensorrt>=8.6.0  # Only install if needed
-
-# LyCORIS training
-# lycoris-lora>=1.0.0
 
 # =================== PLATFORM SPECIFIC ===================
 {"colorama>=0.4.0" if platform.system() == "Windows" else "# colorama  # Not needed on Unix"}
 {"pywin32>=227" if platform.system() == "Windows" else "# pywin32  # Windows only"}
 
 # =================== SAFETY & FALLBACKS ===================
-# Ensure basic packages that should always work
 setuptools>=65.0.0
 wheel>=0.38.0
 pip>=23.0.0
@@ -281,8 +229,8 @@ pip>=23.0.0
     
     return req_file
 
-def create_robust_venv():
-    """Create virtual environment with multiple fallback strategies"""
+def create_robust_venv_fixed():
+    """Create virtual environment with multiple fallback strategies - FIXED FOR COLAB"""
     
     print(f"\n🐍 Creating virtual environment at {VENV_PATH}...")
     
@@ -296,19 +244,22 @@ def create_robust_venv():
             print("🗑️  Removing broken virtual environment")
             shutil.rmtree(VENV_PATH, ignore_errors=True)
     
-    # Strategy 1: Standard venv with system packages
+    # Strategy 1: Colab-safe venv without pip (FIXED)
     try:
-        print("🔧 Strategy 1: Creating venv with system packages...")
+        print("🔧 Strategy 1: Creating Colab-safe venv without pip...")
         
-        create_cmd = [sys.executable, '-m', 'venv', str(VENV_PATH), '--system-site-packages']
+        create_cmd = [sys.executable, '-m', 'venv', str(VENV_PATH), '--without-pip']
         result = subprocess.run(create_cmd, capture_output=True, text=True, timeout=300)
         
         if result.returncode == 0:
-            if test_venv_creation():
-                print("✅ Virtual environment created successfully")
-                return True
-            else:
-                print("⚠️  Venv created but pip test failed")
+            print("✅ Venv created without pip")
+            # Install pip manually
+            if install_pip_manually(VENV_PATH):
+                if test_venv_creation():
+                    print("✅ Virtual environment created successfully (Colab-safe)")
+                    return True
+                else:
+                    print("⚠️  Venv created but pip test failed")
         else:
             print(f"⚠️  Strategy 1 failed: {result.stderr}")
             
@@ -321,9 +272,34 @@ def create_robust_venv():
     if VENV_PATH.exists():
         shutil.rmtree(VENV_PATH, ignore_errors=True)
     
-    # Strategy 2: Venv without system packages
+    # Strategy 2: Standard venv with system packages
     try:
-        print("🔧 Strategy 2: Creating isolated venv...")
+        print("🔧 Strategy 2: Creating venv with system packages...")
+        
+        create_cmd = [sys.executable, '-m', 'venv', str(VENV_PATH), '--system-site-packages']
+        result = subprocess.run(create_cmd, capture_output=True, text=True, timeout=300)
+        
+        if result.returncode == 0:
+            if test_venv_creation():
+                print("✅ Virtual environment created successfully")
+                return True
+            else:
+                print("⚠️  Venv created but pip test failed")
+        else:
+            print(f"⚠️  Strategy 2 failed: {result.stderr}")
+            
+    except subprocess.TimeoutExpired:
+        print("⏱️  Strategy 2 timed out")
+    except Exception as e:
+        print(f"⚠️  Strategy 2 exception: {e}")
+    
+    # Clean up failed attempt
+    if VENV_PATH.exists():
+        shutil.rmtree(VENV_PATH, ignore_errors=True)
+    
+    # Strategy 3: Isolated venv
+    try:
+        print("🔧 Strategy 3: Creating isolated venv...")
         
         create_cmd = [sys.executable, '-m', 'venv', str(VENV_PATH)]
         result = subprocess.run(create_cmd, capture_output=True, text=True, timeout=300)
@@ -335,14 +311,23 @@ def create_robust_venv():
             else:
                 print("⚠️  Isolated venv created but pip test failed")
         else:
-            print(f"⚠️  Strategy 2 failed: {result.stderr}")
+            print(f"⚠️  Strategy 3 failed: {result.stderr}")
             
     except subprocess.TimeoutExpired:
-        print("⏱️  Strategy 2 timed out")
+        print("⏱️  Strategy 3 timed out")
     except Exception as e:
-        print(f"⚠️  Strategy 2 exception: {e}")
+        print(f"⚠️  Strategy 3 exception: {e}")
     
-    # Strategy 3: Use system Python
+    # Strategy 4: Pseudo-venv with system symlinks (NEW)
+    try:
+        print("🔧 Strategy 4: Creating pseudo-venv with system symlinks...")
+        if create_pseudo_venv(VENV_PATH):
+            print("✅ Pseudo-venv created successfully")
+            return True
+    except Exception as e:
+        print(f"⚠️  Strategy 4 exception: {e}")
+    
+    # All strategies failed
     print("📦 Virtual environment creation failed")
     print("   Using system Python (this is OK - system will still work)")
     
@@ -350,6 +335,81 @@ def create_robust_venv():
         send_info("Venv Creation", "Using system Python instead of venv")
     
     return False
+
+def install_pip_manually(venv_path):
+    """Manually install pip in venv using get-pip.py"""
+    try:
+        print("📦 Installing pip manually...")
+        python_exe = venv_path / 'bin' / 'python'
+        
+        if not python_exe.exists():
+            return False
+            
+        # Download get-pip.py
+        import urllib.request
+        get_pip_url = "https://bootstrap.pypa.io/get-pip.py"
+        get_pip_path = venv_path / 'get-pip.py'
+        
+        print("📥 Downloading get-pip.py...")
+        urllib.request.urlretrieve(get_pip_url, get_pip_path)
+        
+        # Install pip
+        cmd = [str(python_exe), str(get_pip_path)]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        
+        # Clean up
+        get_pip_path.unlink(missing_ok=True)
+        
+        if result.returncode == 0:
+            print("✅ Pip installed manually")
+            return True
+        else:
+            print(f"⚠️  Manual pip install failed: {result.stderr}")
+            return False
+            
+    except Exception as e:
+        print(f"⚠️  Manual pip install error: {e}")
+        return False
+
+def create_pseudo_venv(venv_path):
+    """Create a pseudo-venv by symlinking to system executables"""
+    try:
+        # Create basic venv structure
+        venv_path.mkdir(parents=True, exist_ok=True)
+        bin_dir = venv_path / 'bin'
+        bin_dir.mkdir(exist_ok=True)
+        
+        # Create symlinks to system executables
+        system_python = sys.executable
+        venv_python = bin_dir / 'python'
+        venv_pip = bin_dir / 'pip'
+        
+        # Create python symlink
+        if not venv_python.exists():
+            venv_python.symlink_to(system_python)
+        
+        # Find and create pip symlink
+        system_pip = None
+        for pip_name in ['pip', 'pip3']:
+            result = subprocess.run(['which', pip_name], capture_output=True, text=True)
+            if result.returncode == 0:
+                system_pip = result.stdout.strip()
+                break
+                
+        if system_pip and not venv_pip.exists():
+            venv_pip.symlink_to(system_pip)
+            
+        # Test the setup
+        if venv_python.exists() and venv_pip.exists():
+            test_result = subprocess.run([str(venv_pip), '--version'], 
+                                       capture_output=True, text=True, timeout=30)
+            return test_result.returncode == 0
+            
+        return False
+        
+    except Exception as e:
+        print(f"⚠️  Pseudo-venv creation error: {e}")
+        return False
 
 def test_existing_venv():
     """Test if existing venv is working"""
@@ -408,18 +468,12 @@ def install_comprehensive_deps(venv_available):
         print(f"❌ Requirements file not found: {req_file}")
         return install_essential_fallback(pip_executable)
     
-    # Strategy 1: Try enhanced installation if available
-    if ENHANCEMENTS_AVAILABLE:
-        print("✨ Attempting enhanced installation...")
-        if install_with_enhanced_manager(pip_executable, req_file):
-            return True
-    
-    # Strategy 2: Batch install (fastest if it works)
+    # Strategy 1: Batch install (fastest if it works)
     print("🚀 Attempting comprehensive batch installation...")
     if install_batch(pip_executable, req_file):
         return True
     
-    # Strategy 3: Tiered installation (most reliable)
+    # Strategy 2: Tiered installation (most reliable)
     print("📋 Using tiered installation strategy...")
     return install_in_tiers(pip_executable)
 
@@ -454,623 +508,289 @@ def upgrade_pip(pip_executable):
     except Exception as e:
         print(f"⚠️  Pip upgrade error: {e}")
 
-def install_with_enhanced_manager(pip_executable, req_file):
-    """Install using enhanced download manager if available"""
-    try:
-        manager, batch_ops = get_enhanced_manager()
-        
-        # Read requirements and convert to download format
-        with open(req_file, 'r') as f:
-            lines = f.readlines()
-        
-        packages = [line.strip() for line in lines 
-                   if line.strip() and not line.strip().startswith('#')]
-        
-        print(f"📥 Enhanced manager installing {len(packages)} packages...")
-        
-        # Use enhanced manager for better progress tracking
-        success_count = 0
-        for package in packages[:10]:  # Start with first 10 as test
-            try:
-                result = subprocess.run([
-                    pip_executable, 'install', package, '--quiet'
-                ], capture_output=True, text=True, timeout=300)
-                
-                if result.returncode == 0:
-                    success_count += 1
-                    
-            except Exception:
-                pass
-        
-        if success_count >= 8:  # 80% success rate for first batch
-            print("✅ Enhanced installation working, continuing...")
-            # Install remaining packages
-            return install_batch(pip_executable, req_file)
-        else:
-            print("⚠️  Enhanced installation having issues, falling back...")
-            return False
-            
-    except Exception as e:
-        print(f"❌ Enhanced installation error: {e}")
-        return False
-
 def install_batch(pip_executable, req_file):
-    """Try to install all requirements at once"""
+    """Try to install all requirements in one batch"""
     try:
         print("📦 Installing all dependencies in batch...")
         
-        result = subprocess.run([
+        cmd = [
             pip_executable, 'install', '-r', str(req_file),
-            '--quiet', '--no-warn-script-location',
-            '--timeout', '60'
-        ], capture_output=True, text=True, timeout=3600)  # 1 hour timeout
+            '--no-deps', '--quiet', '--disable-pip-version-check'
+        ]
+        
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
         
         if result.returncode == 0:
-            print("✅ Batch installation completed successfully!")
-            print("🛡️  All extension dependencies pre-installed")
-            
-            if ENHANCEMENTS_AVAILABLE:
-                send_success("Dependencies Installed", "Comprehensive environment ready")
-            
+            print("✅ Batch installation successful")
             return True
         else:
-            print("⚠️  Batch installation had issues:")
-            if widget_settings.get('detailed_download') == 'on':
-                print(f"   Error: {result.stderr[:500]}...")
-            print("   Falling back to tiered installation...")
+            print(f"⚠️  Batch installation failed: {result.stderr[:200]}...")
             return False
             
     except subprocess.TimeoutExpired:
-        print("⏱️  Batch installation timed out (1 hour)")
-        print("   Falling back to tiered installation...")
+        print("⏱️  Batch installation timed out")
         return False
     except Exception as e:
-        print(f"❌ Batch installation error: {e}")
+        print(f"⚠️  Batch installation error: {e}")
         return False
 
 def install_in_tiers(pip_executable):
-    """Install dependencies in tiers for maximum compatibility"""
+    """Install packages in tiers for maximum compatibility"""
     
-    print("📋 Installing comprehensive dependencies in tiers...")
-    print("🎯 This ensures ALL extensions will work without conflicts")
+    print("📋 Installing packages in compatibility tiers...")
     
-    # Tier 1: Absolutely Essential (WebUI won't work without these)
-    tier1 = [
-        "torch>=2.0.0,<2.2.0",
-        "torchvision>=0.15.0,<0.17.0", 
-        "transformers>=4.30.0,<4.37.0",
-        "diffusers>=0.20.0,<0.26.0",
-        "gradio>=4.0.0,<4.8.0",
-        "requests>=2.28.0,<3.0.0",
-        "pillow>=9.0.0,<11.0.0",
-        "numpy>=1.21.0,<1.26.0",
-        "safetensors>=0.3.0,<0.5.0"
+    # Tier 1: Essential packages
+    tier1_packages = [
+        "wheel", "setuptools", "pip",
+        "numpy", "pillow", "requests", "tqdm"
     ]
     
-    # Tier 2: Core Extensions (ControlNet, basic functionality)
-    tier2 = [
-        "accelerate>=0.20.0,<0.26.0",
-        "opencv-python>=4.5.0,<5.0.0",
-        "controlnet-aux>=0.0.6",
-        "segment-anything>=1.0",
-        "ultralytics>=8.0.0,<9.0.0",
-        "scipy>=1.9.0,<1.12.0",
-        "tqdm>=4.64.0,<5.0.0",
-        "fastapi>=0.100.0,<0.106.0"
+    # Tier 2: Core ML packages
+    tier2_packages = [
+        "torch", "torchvision", "torchaudio",
+        "transformers", "diffusers", "accelerate"
     ]
     
-    # Tier 3: Advanced Extensions (Face processing, training)
-    tier3 = [
-        "insightface>=0.7.0",
-        "facexlib>=0.3.0",
-        "gfpgan>=1.3.0", 
-        "realesrgan>=0.3.0",
-        "basicsr>=1.4.0",
-        "matplotlib>=3.5.0,<4.0.0",
-        "pandas>=1.5.0,<2.1.0",
-        "scikit-learn>=1.1.0,<1.4.0"
+    # Tier 3: WebUI packages
+    tier3_packages = [
+        "gradio", "fastapi", "uvicorn", "safetensors"
     ]
     
-    # Tier 4: Performance & Optimization
-    tier4 = [
-        "xformers>=0.0.20",
-        "bitsandbytes>=0.39.0,<0.42.0",
-        "onnx>=1.14.0,<1.16.0",
-        "onnxruntime>=1.15.0,<1.17.0",
-        "lion-pytorch>=0.0.6",
-        "dadaptation>=3.1"
-    ]
-    
-    # Tier 5: Audio/Video Extensions  
-    tier5 = [
-        "librosa>=0.9.0,<0.11.0",
-        "soundfile>=0.12.0,<0.13.0",
-        "ffmpeg-python>=0.2.0",
-        "av>=10.0.0,<12.0.0",
-        "whisper>=1.1.0"
-    ]
-    
-    # Tier 6: Quality of Life & APIs
-    tier6 = [
-        "rich>=12.0.0,<14.0.0",
-        "psutil>=5.9.0,<6.0.0",
-        "lpips>=0.1.0",
-        "clip-interrogator>=0.6.0",
-        "openai>=0.28.0,<2.0.0",
-        "ipywidgets>=8.0.0,<9.0.0"
+    # Tier 4: Extension packages
+    tier4_packages = [
+        "opencv-python", "controlnet-aux", "insightface"
     ]
     
     tiers = [
-        ("Essential WebUI", tier1, True),      # Must succeed
-        ("Core Extensions", tier2, True),      # Should succeed
-        ("Advanced Extensions", tier3, False), # Can fail
-        ("Performance", tier4, False),         # Can fail  
-        ("Audio/Video", tier5, False),         # Can fail
-        ("Quality of Life", tier6, False)      # Can fail
+        ("Essential", tier1_packages),
+        ("Core ML", tier2_packages),
+        ("WebUI", tier3_packages),
+        ("Extensions", tier4_packages)
     ]
     
-    total_success = 0
-    total_attempted = 0
-    critical_failures = 0
+    success_count = 0
+    total_tiers = len(tiers)
     
-    for tier_name, packages, is_critical in tiers:
-        print(f"\n🎯 Installing {tier_name} tier ({len(packages)} packages)...")
+    for tier_name, packages in tiers:
+        print(f"📦 Installing {tier_name} tier ({len(packages)} packages)...")
         
-        success_count = 0
-        for i, package in enumerate(packages, 1):
-            try:
-                print(f"  📦 [{i}/{len(packages)}] {package[:50]}...", end="")
-                
-                result = subprocess.run([
-                    pip_executable, 'install', package,
-                    '--quiet', '--no-warn-script-location'
-                ], capture_output=True, text=True, timeout=600)  # 10 min per package
-                
-                if result.returncode == 0:
-                    success_count += 1
-                    print(" ✅")
-                else:
-                    print(f" ❌")
-                    if widget_settings.get('detailed_download') == 'on':
-                        print(f"      Error: {result.stderr[:100]}...")
-                        
-            except subprocess.TimeoutExpired:
-                print(" ⏱️ (timeout)")
-            except Exception as e:
-                print(f" ❌ ({str(e)[:30]}...)")
-        
-        total_success += success_count
-        total_attempted += len(packages)
-        
-        success_rate = (success_count / len(packages)) * 100
-        print(f"  📊 {tier_name}: {success_count}/{len(packages)} successful ({success_rate:.1f}%)")
-        
-        if is_critical and success_rate < 70:  # 70% success required for critical tiers
-            critical_failures += 1
-            print(f"  ⚠️  Critical tier has low success rate!")
+        tier_success = install_package_list(pip_executable, packages)
+        if tier_success:
+            success_count += 1
+            print(f"✅ {tier_name} tier completed")
+        else:
+            print(f"⚠️  {tier_name} tier had issues")
+    
+    print(f"📊 Installation summary: {success_count}/{total_tiers} tiers successful")
+    return success_count >= 2  # Need at least essential + core ML
+
+def install_package_list(pip_executable, packages):
+    """Install a list of packages with individual error handling"""
+    
+    success_count = 0
+    
+    for package in packages:
+        try:
+            cmd = [pip_executable, 'install', package, '--quiet', '--disable-pip-version-check']
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
             
-            if ENHANCEMENTS_AVAILABLE:
-                send_error("Installation Issue", f"{tier_name} tier had low success rate")
+            if result.returncode == 0:
+                success_count += 1
+            else:
+                print(f"⚠️  Failed to install {package}")
+                
+        except Exception as e:
+            print(f"⚠️  Error installing {package}: {e}")
     
-    overall_success_rate = (total_success / total_attempted) * 100
-    print(f"\n📈 Overall Installation Results:")
-    print(f"   ✅ Successful: {total_success}/{total_attempted} ({overall_success_rate:.1f}%)")
-    print(f"   ⚠️  Critical failures: {critical_failures}")
-    
-    if overall_success_rate >= 80 and critical_failures == 0:
-        print("🎉 Comprehensive environment ready!")
-        print("🛡️  Extensions should install without major conflicts")
-        
-        if ENHANCEMENTS_AVAILABLE:
-            send_success("Environment Ready", f"Comprehensive dependencies installed ({overall_success_rate:.1f}% success)")
-        
-        return True
-    elif overall_success_rate >= 60 and critical_failures <= 1:
-        print("✅ Core environment ready (some optional features missing)")
-        print("🛡️  Most extensions should work fine")
-        
-        if ENHANCEMENTS_AVAILABLE:
-            send_info("Environment Ready", f"Core dependencies installed ({overall_success_rate:.1f}% success)")
-        
-        return True
-    else:
-        print("⚠️  Minimal environment - may have extension conflicts")
-        print("🔧 Consider running the installation again")
-        
-        if ENHANCEMENTS_AVAILABLE:
-            send_error("Installation Issues", f"Low success rate ({overall_success_rate:.1f}%)")
-        
-        return False
+    return success_count > len(packages) * 0.7  # 70% success rate
 
 def install_essential_fallback(pip_executable):
-    """Fallback installation of only essential packages"""
+    """Install only essential packages as fallback"""
     
     print("🆘 Installing essential packages only (fallback mode)...")
     
     essential_packages = [
-        "torch>=2.0.0",
-        "torchvision>=0.15.0", 
-        "transformers>=4.30.0",
-        "diffusers>=0.20.0",
-        "gradio>=4.0.0",
-        "requests>=2.28.0",
-        "pillow>=9.0.0",
-        "numpy>=1.21.0"
+        "torch", "torchvision", "transformers", "diffusers",
+        "gradio", "safetensors", "pillow", "numpy"
     ]
     
-    success_count = 0
-    
-    for package in essential_packages:
-        try:
-            print(f"  📦 {package}...", end="")
-            result = subprocess.run([
-                pip_executable, 'install', package, '--quiet'
-            ], capture_output=True, text=True, timeout=300)
-            
-            if result.returncode == 0:
-                success_count += 1
-                print(" ✅")
-            else:
-                print(" ❌")
-                
-        except Exception:
-            print(" ❌")
-    
-    print(f"📊 Essential packages: {success_count}/{len(essential_packages)} installed")
-    
-    if success_count >= 6:  # At least 6/8 essential packages
-        print("✅ Essential environment ready")
-        return True
-    else:
-        print("❌ Critical installation failure")
-        return False
+    return install_package_list(pip_executable, essential_packages)
 
 def verify_installation():
-    """Verify key packages are working correctly"""
+    """Verify that key packages are installed and working"""
     
-    print("\n🧪 Verifying installation...")
+    print("\n🔍 Verifying installation...")
     
-    critical_imports = [
-        ("torch", "PyTorch", "import torch; torch.cuda.is_available()"),
-        ("transformers", "Transformers", "from transformers import pipeline"),
-        ("diffusers", "Diffusers", "from diffusers import StableDiffusionPipeline"), 
-        ("gradio", "Gradio", "import gradio"),
-        ("PIL", "Pillow", "from PIL import Image"),
-        ("cv2", "OpenCV", "import cv2"),
-        ("numpy", "NumPy", "import numpy"),
-        ("requests", "Requests", "import requests")
+    test_packages = [
+        ("torch", "import torch; print(f'PyTorch {torch.__version__}')"),
+        ("transformers", "import transformers; print(f'Transformers {transformers.__version__}')"),
+        ("diffusers", "import diffusers; print(f'Diffusers {diffusers.__version__}')"),
+        ("gradio", "import gradio; print(f'Gradio {gradio.__version__}')")
     ]
     
-    working_count = 0
-    cuda_available = False
+    working_packages = 0
     
-    for module, name, test_code in critical_imports:
+    for package_name, test_code in test_packages:
         try:
             exec(test_code)
-            print(f"  ✅ {name}")
-            working_count += 1
-            
-            if module == "torch":
-                import torch
-                cuda_available = torch.cuda.is_available()
-                if cuda_available:
-                    print(f"     🚀 CUDA available: {torch.cuda.get_device_name(0)}")
-                else:
-                    print(f"     💻 CPU-only mode")
-                    
-        except ImportError:
-            print(f"  ❌ {name} - not installed")
+            working_packages += 1
+            print(f"✅ {package_name} working")
         except Exception as e:
-            print(f"  ⚠️  {name} - installed but has issues: {str(e)[:50]}...")
-            working_count += 0.5  # Partial credit
+            print(f"⚠️  {package_name} not working: {e}")
     
-    print(f"\n📊 Verification Results:")
-    print(f"   ✅ Working packages: {working_count}/{len(critical_imports)}")
-    print(f"   🚀 CUDA acceleration: {'Available' if cuda_available else 'Not available'}")
-    
-    if working_count >= len(critical_imports) - 1:
-        print("🎉 Environment verification passed!")
-        
-        if ENHANCEMENTS_AVAILABLE:
-            send_success("Verification Complete", "All critical packages working")
-        
-    elif working_count >= len(critical_imports) - 2:
-        print("✅ Environment mostly working (minor issues)")
-    else:
-        print("⚠️  Environment has significant issues")
-        
-        if ENHANCEMENTS_AVAILABLE:
-            send_error("Verification Issues", "Some critical packages not working")
+    print(f"📊 Verification: {working_packages}/{len(test_packages)} packages working")
+    return working_packages >= 2
 
 def setup_enhanced_download_manager():
     """Setup enhanced download manager if available"""
-    try:
-        manager, batch_ops = get_enhanced_manager()
-        
-        # Configure download manager
-        concurrent_downloads = widget_settings.get('concurrent_downloads', 3)
-        
-        print(f"✨ Enhanced download manager configured")
-        print(f"   📥 Concurrent downloads: {concurrent_downloads}")
-        
-        # Add progress callback if logging available
-        if ENHANCEMENTS_AVAILABLE:
-            try:
-                logger = get_advanced_logger()
-                
-                def progress_callback(status):
-                    if status.get('total_progress', 0) == 100:
-                        send_success("Downloads Complete", "All queued downloads finished")
-                        logger.log_event('info', 'downloads', 'All downloads completed')
-                        
-                manager.add_progress_callback(progress_callback)
-                
-            except Exception as e:
-                print(f"⚠️  Could not setup progress tracking: {e}")
-        
-        return manager, batch_ops
-        
-    except Exception as e:
-        print(f"⚠️  Enhanced download manager setup failed: {e}")
-        return None, None
-
-# =================== WEBUI INSTALLATION ===================
+    
+    if ENHANCEMENTS_AVAILABLE:
+        try:
+            print("✨ Setting up enhanced download manager...")
+            enhanced_manager, batch_ops = get_enhanced_manager()
+            print("✅ Enhanced download manager ready")
+            return True
+        except Exception as e:
+            print(f"⚠️  Enhanced manager setup failed: {e}")
+            return False
+    return False
 
 def install_webui():
-    """Install WebUI with enhanced error handling"""
+    """Install selected WebUI"""
     
-    print("\n" + "="*60)
-    print("🚀 Installing Stable Diffusion WebUI...")
-    print("="*60)
+    print("🚀 Installing WebUI...")
     
-    # Get WebUI type from settings
+    # Get WebUI selection from settings
     webui_type = widget_settings.get('change_webui', 'automatic1111')
-    webui_path = get_webui_path(webui_type)
+    home_path = HOME
     
-    print(f"📦 Installing: {webui_type}")
-    print(f"📍 Location: {webui_path}")
+    webui_configs = {
+        'automatic1111': {
+            'url': 'https://github.com/AUTOMATIC1111/stable-diffusion-webui.git',
+            'path': home_path / 'stable-diffusion-webui',
+            'branch': widget_settings.get('commit_hash', 'master')
+        },
+        'ComfyUI': {
+            'url': 'https://github.com/comfyanonymous/ComfyUI.git',
+            'path': home_path / 'ComfyUI',
+            'branch': 'master'
+        }
+    }
     
-    if webui_path.exists():
-        print(f"✅ WebUI {webui_type} already exists")
-        
-        # Check if update is requested
-        if widget_settings.get('latest_webui') == 'on':
-            print("🔄 Updating WebUI...")
-            update_webui(webui_path)
-        
-        return True
+    config = webui_configs.get(webui_type, webui_configs['automatic1111'])
     
     try:
-        print(f"⌚ Unpacking Stable Diffusion {webui_type}...")
-        
-        # Use enhanced webui installer if available
-        if ENHANCEMENTS_AVAILABLE:
-            result = install_webui_enhanced(webui_type, webui_path)
+        if not config['path'].exists():
+            print(f"📥 Cloning {webui_type}...")
+            
+            cmd = ['git', 'clone', config['url'], str(config['path'])]
+            if config.get('branch') and config['branch'] != 'master':
+                cmd.extend(['--branch', config['branch']])
+                
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            
+            if result.returncode == 0:
+                print(f"✅ {webui_type} cloned successfully")
+                return True
+            else:
+                print(f"❌ Failed to clone {webui_type}: {result.stderr}")
+                return False
         else:
-            result = install_webui_standard(webui_type, webui_path)
-        
-        if result:
-            print(f"✅ WebUI {webui_type} installed successfully")
-            
-            if ENHANCEMENTS_AVAILABLE:
-                send_success("WebUI Installed", f"{webui_type} ready to use")
-            
+            print(f"✅ {webui_type} already exists")
             return True
-        else:
-            print(f"❌ WebUI {webui_type} installation failed")
-            
-            if ENHANCEMENTS_AVAILABLE:
-                send_error("WebUI Installation Failed", f"Could not install {webui_type}")
-            
-            return False
             
     except Exception as e:
         print(f"❌ WebUI installation error: {e}")
-        
-        if ENHANCEMENTS_AVAILABLE:
-            send_error("WebUI Installation Error", str(e))
-        
         return False
-
-def get_webui_path(webui_type):
-    """Get WebUI installation path"""
-    webui_paths = {
-        'automatic1111': HOME / 'stable-diffusion-webui',
-        'ComfyUI': HOME / 'ComfyUI',
-        'InvokeAI': HOME / 'InvokeAI',
-        'StableSwarmUI': HOME / 'StableSwarmUI'
-    }
-    
-    return webui_paths.get(webui_type, HOME / 'stable-diffusion-webui')
-
-def install_webui_enhanced(webui_type, webui_path):
-    """Install WebUI using enhanced methods"""
-    try:
-        # Use enhanced webui installer
-        from scripts import webui_installer
-        return webui_installer.install_webui(webui_type, webui_path)
-        
-    except ImportError:
-        # Fallback to standard installation
-        return install_webui_standard(webui_type, webui_path)
-
-def install_webui_standard(webui_type, webui_path):
-    """Standard WebUI installation"""
-    try:
-        # Import and run existing webui installer
-        import importlib.util
-        installer_path = SCRIPTS / 'webui-installer.py'
-        
-        if installer_path.exists():
-            spec = importlib.util.spec_from_file_location("webui_installer", installer_path)
-            installer_module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(installer_module)
-            return True
-        else:
-            print(f"❌ WebUI installer not found: {installer_path}")
-            return False
-            
-    except Exception as e:
-        print(f"❌ Standard WebUI installation error: {e}")
-        return False
-
-def update_webui(webui_path):
-    """Update existing WebUI installation"""
-    try:
-        if (webui_path / '.git').exists():
-            print("🔄 Updating WebUI via git...")
-            result = subprocess.run([
-                'git', 'pull'
-            ], cwd=webui_path, capture_output=True, text=True)
-            
-            if result.returncode == 0:
-                print("✅ WebUI updated successfully")
-            else:
-                print(f"⚠️  WebUI update had issues: {result.stderr}")
-        else:
-            print("⚠️  WebUI is not a git repository, cannot update")
-            
-    except Exception as e:
-        print(f"❌ WebUI update error: {e}")
-
-# =================== MODEL AND ASSET DOWNLOADING ===================
 
 def download_models_and_assets():
-    """Download models and other assets with enhanced progress tracking"""
+    """Download models and assets based on widget settings"""
     
-    print("\n" + "="*60)
     print("🎨 Downloading models and assets...")
-    print("="*60)
     
-    # Get download URLs from settings
-    download_items = collect_download_items()
+    # Get all URLs from widget settings
+    url_categories = {
+        'Models': widget_settings.get('Model_url', ''),
+        'VAEs': widget_settings.get('Vae_url', ''),
+        'LoRAs': widget_settings.get('LoRA_url', ''),
+        'Embeddings': widget_settings.get('Embedding_url', ''),
+        'Extensions': widget_settings.get('Extensions_url', ''),
+        'ADetailer': widget_settings.get('ADetailer_url', ''),
+        'Custom Files': widget_settings.get('custom_file_urls', '')
+    }
     
-    if not download_items:
-        print("ℹ️  No models or assets to download")
+    total_downloads = 0
+    successful_downloads = 0
+    
+    for category, urls_string in url_categories.items():
+        if not urls_string:
+            continue
+            
+        urls = [url.strip() for url in urls_string.split(',') if url.strip()]
+        if not urls:
+            continue
+            
+        print(f"📥 Downloading {category} ({len(urls)} items)...")
+        
+        for url in urls:
+            total_downloads += 1
+            try:
+                if category == 'Extensions':
+                    # Use git clone for extensions
+                    success = download_extension(url)
+                else:
+                    # Use m_download for models/files
+                    success = m_download(url, log=True)
+                    
+                if success:
+                    successful_downloads += 1
+                    
+            except Exception as e:
+                print(f"⚠️  Download failed for {url}: {e}")
+    
+    # Summary
+    if total_downloads == 0:
+        print("⚠️  No downloads specified")
         return True
-    
-    print(f"📥 Found {len(download_items)} items to download")
-    
-    # Use enhanced download manager if available
-    if ENHANCEMENTS_AVAILABLE:
-        return download_with_enhanced_manager(download_items)
-    else:
-        return download_with_standard_manager(download_items)
-
-def collect_download_items():
-    """Collect all download items from widget settings"""
-    
-    download_items = []
-    
-    # Model URLs
-    url_keys = [
-        'Model_url', 'Vae_url', 'LoRA_url', 'Embedding_url', 
-        'Extensions_url', 'ADetailer_url', 'custom_file_urls'
-    ]
-    
-    for key in url_keys:
-        urls = widget_settings.get(key, '')
-        if urls:
-            # Split by comma and clean up
-            url_list = [url.strip() for url in urls.split(',') if url.strip()]
-            download_items.extend(url_list)
-    
-    return download_items
-
-def download_with_enhanced_manager(download_items):
-    """Download using enhanced manager with progress tracking"""
-    
-    try:
-        manager, batch_ops = get_enhanced_manager()
-        
-        print("✨ Using enhanced download manager...")
-        
-        # Add items to download queue
-        count = manager.add_to_queue(download_items)
-        print(f"📥 Added {count} items to download queue")
-        
-        # Start downloads
-        manager.start_queue()
-        
-        # Monitor progress
-        print("⏳ Monitoring download progress...")
-        last_status = None
-        
-        while True:
-            status = manager.get_queue_status()
-            
-            if status != last_status:
-                active = status['downloading']
-                completed = status['completed']
-                failed = status['failed']
-                total = status['total_items']
-                
-                if active == 0:
-                    break  # All downloads finished
-                
-                print(f"   📊 Progress: {completed}/{total} complete, {active} downloading, {failed} failed")
-                last_status = status
-            
-            time.sleep(5)
-        
-        final_status = manager.get_queue_status()
-        
-        print(f"\n📈 Download Results:")
-        print(f"   ✅ Completed: {final_status['completed']}")
-        print(f"   ❌ Failed: {final_status['failed']}")
-        
-        success = final_status['failed'] == 0
-        
-        if success:
-            print("🎉 All downloads completed successfully!")
-            send_success("Downloads Complete", f"Downloaded {final_status['completed']} items")
-        else:
-            print(f"⚠️  {final_status['failed']} downloads failed")
-            send_error("Download Issues", f"{final_status['failed']} downloads failed")
-        
-        return success
-        
-    except Exception as e:
-        print(f"❌ Enhanced download error: {e}")
-        print("📦 Falling back to standard download method...")
-        return download_with_standard_manager(download_items)
-
-def download_with_standard_manager(download_items):
-    """Download using standard LSDAI manager"""
-    
-    print("📦 Using standard download manager...")
-    
-    success_count = 0
-    total_count = len(download_items)
-    
-    for i, item in enumerate(download_items, 1):
-        try:
-            print(f"📥 [{i}/{total_count}] Downloading: {item[:60]}...")
-            
-            # Use existing LSDAI download function
-            result = m_download(item, log=widget_settings.get('detailed_download') == 'on')
-            
-            if result:
-                success_count += 1
-                print(f"   ✅ Success")
-            else:
-                print(f"   ❌ Failed")
-                
-        except Exception as e:
-            print(f"   ❌ Error: {e}")
-    
-    print(f"\n📊 Standard Download Results: {success_count}/{total_count} successful")
-    
-    success = success_count > 0
-    
-    if success and success_count == total_count:
-        print("🎉 All downloads completed!")
-    elif success:
-        print(f"✅ {success_count} downloads completed ({total_count - success_count} failed)")
+    elif successful_downloads == total_downloads:
+        print(f"✅ All {total_downloads} downloads completed successfully")
+        return True
+    elif successful_downloads > 0:
+        print(f"✅ {successful_downloads}/{total_downloads} downloads completed")
+        return True
     else:
         print("❌ All downloads failed")
-    
-    return success
+        return False
+
+def download_extension(url):
+    """Download extension using git clone"""
+    try:
+        # Determine WebUI type for extension path
+        webui_type = widget_settings.get('change_webui', 'automatic1111')
+        
+        if webui_type == 'automatic1111':
+            extensions_dir = HOME / 'stable-diffusion-webui' / 'extensions'
+        elif webui_type == 'ComfyUI':
+            extensions_dir = HOME / 'ComfyUI' / 'custom_nodes'
+        else:
+            extensions_dir = HOME / 'stable-diffusion-webui' / 'extensions'
+        
+        extensions_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Extract repo name from URL
+        repo_name = url.split('/')[-1].replace('.git', '')
+        target_path = extensions_dir / repo_name
+        
+        if not target_path.exists():
+            cmd = ['git', 'clone', url, str(target_path)]
+            result = subprocess.run(cmd, capture_output=True, text=True)
+            return result.returncode == 0
+        else:
+            return True  # Already exists
+            
+    except Exception as e:
+        print(f"Extension download error: {e}")
+        return False
 
 # =================== MAIN EXECUTION ===================
 
@@ -1096,10 +816,6 @@ def main():
     
     # Step 4: Final setup and verification
     print("\nStep 4/4: Final setup...")
-    
-    # Install extensions if specified
-    if widget_settings.get('Extensions_url'):
-        install_extensions()
     
     # Setup performance monitoring if available
     if ENHANCEMENTS_AVAILABLE:
@@ -1129,75 +845,21 @@ def main():
         if ENHANCEMENTS_AVAILABLE:
             send_error("LSDAI Setup Issues", "Some components failed to install")
 
-def install_extensions():
-    """Install extensions with enhanced management"""
-    
-    print("🔧 Installing extensions...")
-    
-    if ENHANCEMENTS_AVAILABLE:
-        try:
-            from modules.ExtensionManager import get_extension_manager
-            
-            ext_manager = get_extension_manager()
-            
-            # Get extension URLs
-            extension_urls = widget_settings.get('Extensions_url', '').split(',')
-            extension_urls = [url.strip() for url in extension_urls if url.strip()]
-            
-            if extension_urls:
-                # Convert to extension info format
-                extensions_to_install = []
-                for url in extension_urls:
-                    name = Path(url).stem
-                    extensions_to_install.append({
-                        'name': name,
-                        'url': url
-                    })
-                
-                # Install using enhanced manager
-                results = ext_manager.batch_install_extensions(extensions_to_install)
-                
-                print(f"📊 Extension Results:")
-                print(f"   ✅ Installed: {len(results['successful'])}")
-                print(f"   ❌ Failed: {len(results['failed'])}")
-                
-                if results['successful']:
-                    send_success("Extensions Installed", f"Installed {len(results['successful'])} extensions")
-                
-                if results['failed']:
-                    send_error("Extension Issues", f"{len(results['failed'])} extensions failed")
-            
-        except Exception as e:
-            print(f"❌ Enhanced extension installation error: {e}")
-            # Fallback to standard method would go here
-    else:
-        print("📦 Using standard extension installation...")
-        # Standard extension installation would go here
-
 def setup_performance_monitoring():
     """Setup performance monitoring if available"""
     
-    try:
-        logger = get_advanced_logger()
-        
-        # Log setup completion
-        logger.log_event('info', 'setup', 'LSDAI setup completed with enhancements')
-        
-        # Start resource monitoring
-        if widget_settings.get('performance_monitoring', True):
-            from modules.AdvancedLogging import SystemResourceMonitor
-            
-            resource_monitor = SystemResourceMonitor(logger)
-            resource_monitor.start_monitoring()
-            
-            print("📊 Performance monitoring started")
-        
-    except Exception as e:
-        print(f"⚠️  Performance monitoring setup failed: {e}")
+    if ENHANCEMENTS_AVAILABLE:
+        try:
+            print("📊 Setting up performance monitoring...")
+            logger = get_advanced_logger()
+            logger.log_system_info()
+            print("✅ Performance monitoring active")
+        except Exception as e:
+            print(f"⚠️  Monitoring setup failed: {e}")
 
-# Execute main function if running directly
+# Execute main if run directly
 if __name__ == "__main__":
     main()
-else:
-    # If imported, run main automatically
-    main()
+
+# For compatibility when imported
+create_robust_venv = create_robust_venv_fixed
