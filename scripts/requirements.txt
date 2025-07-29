@@ -1,142 +1,155 @@
-# ============================================================================
-# LightningSdaigen Universal Requirements - Complete 10WebUI Compatibility
-# ============================================================================
-# This comprehensive requirements file ensures perfect compatibility across
-# all 10 WebUI types with resolved version conflicts and optimal performance.
+# LSDAI Comprehensive Extension-Safe Requirements
+# Pre-installs ALL common extension dependencies to prevent conflicts
+# Uses compatible version ranges that work across platforms
 
-# ============================================================================
-# CRITICAL: PyTorch Ecosystem (CUDA 12.1 optimized)
-# ============================================================================
---extra-index-url https://download.pytorch.org/whl/cu121
+# =================== CORE PYTORCH STACK ===================
+# Let pip choose CUDA version automatically
+torch>=2.0.0,<2.2.0
+torchvision>=0.15.0,<0.17.0
+torchaudio>=2.0.0,<2.2.0
 
-# Core PyTorch with CUDA support
-torch==2.1.2+cu121
-torchvision==0.16.2+cu121  
-torchaudio==2.1.2+cu121
+# =================== STABLE DIFFUSION CORE ===================
+transformers>=4.30.0,<4.37.0
+diffusers>=0.20.0,<0.26.0
+accelerate>=0.20.0,<0.26.0
+safetensors>=0.3.0,<0.5.0
+compel>=2.0.0,<3.0.0
 
-# Memory optimization and acceleration
-xformers==0.0.23.post1
-accelerate==0.25.0
-bitsandbytes==0.42.0
+# =================== WEBUI FRAMEWORK ===================
+gradio>=4.0.0,<4.8.0
+fastapi>=0.100.0,<0.106.0
+uvicorn>=0.20.0,<0.25.0
+pydantic>=1.10.0,<3.0.0
 
-# ============================================================================
-# AI/ML Core Libraries
-# ============================================================================
+# =================== PERFORMANCE & ACCELERATION ===================
+# xformers - let it choose compatible version
+xformers>=0.0.20
+# ONNX for some extensions
+onnx>=1.14.0,<1.16.0
+onnxruntime>=1.15.0,<1.17.0
 
-# Transformers and Diffusion Models
-transformers==4.36.2
-diffusers==0.25.0
-safetensors==0.4.1
-tokenizers==0.15.0
+# =================== COMPUTER VISION & IMAGE ===================
+opencv-python>=4.5.0,<5.0.0
+pillow>=9.0.0,<11.0.0
+imageio>=2.25.0,<3.0.0
+imageio-ffmpeg>=0.4.0,<0.5.0
+scikit-image>=0.19.0,<0.22.0
 
-# Model utilities
-huggingface-hub==0.20.2
-datasets==2.16.1
-evaluate==0.4.1
+# =================== NUMERICAL & SCIENTIFIC ===================
+numpy>=1.21.0,<1.26.0
+scipy>=1.9.0,<1.12.0
+pandas>=1.5.0,<2.1.0
+matplotlib>=3.5.0,<4.0.0
 
-# Scientific computing
-numpy==1.24.4
-scipy==1.11.4
-scikit-learn==1.3.2
-scikit-image==0.22.0
+# =================== CONTROLNET DEPENDENCIES ===================
+# Pre-install ControlNet requirements
+controlnet-aux>=0.0.6
+segment-anything>=1.0
+ultralytics>=8.0.0,<9.0.0
 
-# ============================================================================
-# Computer Vision & Image Processing
-# ============================================================================
+# =================== COMMON EXTENSION DEPENDENCIES ===================
+# For various popular extensions
+insightface>=0.7.0
+facexlib>=0.3.0
+gfpgan>=1.3.0
+realesrgan>=0.3.0
+basicsr>=1.4.0
 
-# Core image processing
-opencv-python==4.8.1.78
-opencv-contrib-python==4.8.1.78
-Pillow==10.1.0
-imageio==2.33.1
-imageio-ffmpeg==0.4.9
+# =================== NETWORK & DOWNLOADS ===================
+requests>=2.28.0,<3.0.0
+urllib3>=1.26.0,<3.0.0
+aiohttp>=3.8.0,<4.0.0
+httpx>=0.24.0,<0.26.0
+tqdm>=4.64.0,<5.0.0
+wget>=3.2
 
-# Advanced image processing
-albumentations==1.3.1
-kornia==0.7.0
-timm==0.9.12
+# =================== FILE HANDLING ===================
+send2trash>=1.8.0
+psutil>=5.9.0,<6.0.0
+pathvalidate>=2.5.0
 
-# ============================================================================
-# Face Processing & Analysis (FaceFusion, RoopUnleashed)
-# ============================================================================
+# =================== AUDIO PROCESSING ===================
+# For extensions that need audio
+librosa>=0.9.0,<0.11.0
+soundfile>=0.12.0,<0.13.0
 
-# ONNX Runtime with GPU support
-onnxruntime-gpu==1.16.3
-onnxruntime==1.16.3
-onnx==1.15.0
+# =================== VIDEO PROCESSING ===================
+# For video extensions
+ffmpeg-python>=0.2.0
+av>=10.0.0,<12.0.0
 
-# Face analysis and processing
-insightface==0.7.3
-mediapipe==0.10.8
-dlib==19.24.2
+# =================== WEB & API ===================
+flask>=2.0.0,<3.0.0
+websockets>=10.0,<12.0
+markdown>=3.4.0,<4.0.0
+jinja2>=3.0.0,<4.0.0
 
-# Face enhancement
-gfpgan==1.3.8
-realesrgan==0.3.0
-basicsr==1.4.2
-facexlib==0.3.0
+# =================== MODEL FORMAT SUPPORT ===================
+# GGML/GGUF support
+gguf>=0.1.0
+llama-cpp-python>=0.2.0
 
-# Additional face processing
-filterpy==1.4.5
-numba==0.58.1
+# =================== DEVELOPMENT & DEBUGGING ===================
+rich>=12.0.0,<14.0.0
+loguru>=0.6.0,<0.8.0
 
-# ============================================================================
-# Web Interface & UI (Gradio, FastAPI)
-# ============================================================================
+# =================== COMMON UTILITIES ===================
+# Frequently needed by extensions
+jsonschema>=4.0.0,<5.0.0
+pyyaml>=6.0,<7.0
+toml>=0.10.0
+omegaconf>=2.3.0,<3.0.0
+hydra-core>=1.3.0,<2.0.0
 
-# Primary web frameworks
-gradio==4.7.1
-fastapi==0.105.0
-uvicorn[standard]==0.24.0
+# =================== JUPYTER/COLAB COMPATIBILITY ===================
+ipython>=8.0.0,<9.0.0
+ipywidgets>=8.0.0,<9.0.0
 
-# Web utilities
-starlette==0.27.0
-pydantic==2.5.2
-python-multipart==0.0.6
-websockets==12.0
+# =================== CLOUD STORAGE ===================
+# For extensions that use cloud storage
+google-cloud-storage>=2.0.0,<3.0.0
+boto3>=1.26.0,<2.0.0
 
-# ============================================================================
-# Audio/Video Processing
-# ============================================================================
+# =================== MACHINE LEARNING EXTRAS ===================
+# Additional ML libraries that extensions often need
+scikit-learn>=1.1.0,<1.4.0
+lightgbm>=3.3.0,<4.0.0
+catboost>=1.0.0,<2.0.0
 
-# FFmpeg Python bindings
-ffmpeg-python==0.2.0
-moviepy==1.0.3
+# =================== MEMORY OPTIMIZATION ===================
+# For memory-efficient operations
+bitsandbytes>=0.39.0,<0.42.0
+# optimum>=1.13.0,<2.0.0
 
-# Audio processing
-librosa==0.10.1
-soundfile==0.12.1
-noisereduce==3.0.0
+# =================== TOKENIZERS & NLP ===================
+tokenizers>=0.13.0,<0.15.0
+sentencepiece>=0.1.99,<0.2.0
+protobuf>=3.20.0,<5.0.0
 
-# ============================================================================
-# Data Processing & Utilities
-# ============================================================================
+# =================== QUALITY ASSURANCE ===================
+# For extensions that do quality analysis
+lpips>=0.1.0
+clip-interrogator>=0.6.0
 
-# Core data processing
-pandas==2.1.4
-tqdm==4.66.1
-omegaconf==2.3.0
-hydra-core==1.3.2
+# =================== PLATFORM COMPATIBILITY ===================
+# Ensure cross-platform compatibility
+colorama>=0.4.0  # Windows color support
+pywin32>=227; sys_platform == "win32"  # Windows-specific
 
-# File handling
-pathlib2==2.3.7.post1
-send2trash==1.8.2
-python-magic==0.4.27
+# =================== EXTENSION-SPECIFIC COMMON DEPS ===================
+# Dreambooth & Training
+lion-pytorch>=0.0.6
+dadaptation>=3.1
+prodigyopt>=1.0
 
-# Compression and archives
-zipfile38==0.0.3
-py7zr==0.20.8
+# API Extensions
+openai>=0.28.0,<2.0.0
 
-# ============================================================================
-# Network & API
-# ============================================================================
+# Database Extensions
+sqlite-utils>=3.34,<4.0.0
 
-# HTTP and networking
-requests==2.31.0
-httpx==0.25.2
-aiohttp==3.9.1
-urllib3==2.1.0
-
-# API utilities
-pydantic==2.5.2
-fastapi-
+# =================== SAFETY & FALLBACKS ===================
+# Ensure basic packages that should always work
+setuptools>=65.0.0
+wheel>=0.38.0
+pip>=23.0.0
