@@ -63,7 +63,11 @@ class WidgetManager:
         ''')
 
     def read_model_data(self, file_path, data_type):
-        """Read model data safely using importlib."""
+        """
+        Read model data safely using importlib.
+        FIXED: This logic is now more robust and only extracts model names (keys)
+        to prevent 'unhashable type: dict' errors with ipywidgets.
+        """
         type_map = {
             'model': ('model_list', ['none']),
             'vae': ('vae_list', ['none', 'ALL']),
@@ -80,13 +84,9 @@ class WidgetManager:
             if not isinstance(data_dict, dict):
                 raise TypeError(f"Data for '{key}' is not a dictionary.")
             
-            # Build options list
+            # Build options list using only the keys (names) from the data dictionary.
             options = list(prefixes)
-            for category, items in data_dict.items():
-                if isinstance(items, list):
-                    options.extend(items)
-                else:
-                    options.append(category)
+            options.extend(data_dict.keys())
             
             return options
         except Exception as e:
@@ -170,21 +170,16 @@ class WidgetManager:
         
         # XL models toggle callback
         def update_xl_options(change):
-            if change['new']:
-                # Switch to XL model options
-                model_options = [opt for opt in self.widgets['model'].options if 'XL' in opt or opt in ['none']]
-            else:
-                # Switch to regular model options
-                model_options = self.read_model_data(SCRIPTS / '_models_data.py', 'model')
+            model_data_file = SCRIPTS / ('_xl_models_data.py' if change.get('new') else '_models_data.py')
             
-            self.widgets['model'].options = model_options
+            self.widgets['model'].options = self.read_model_data(model_data_file, 'model')
             self.widgets['model'].value = ['none']
         
         self.widgets['XL_models'].observe(update_xl_options, names='value')
         
         # WebUI change callback
         def update_webui_options(change):
-            update_current_webui(change['new'])
+            update_current_webui(change.get('new', 'automatic1111'))
             
         self.widgets['change_webui'].observe(update_webui_options, names='value')
 
@@ -335,7 +330,7 @@ def export_settings(button=None):
         # Create export data
         export_data = {
             'widgets': all_settings.get('WIDGETS', {}),
-            'timestamp': js.get_current_timestamp(),
+            'timestamp': int(time.time()),
             'version': '2.0'
         }
         
