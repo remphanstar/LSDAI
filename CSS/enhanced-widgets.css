@@ -1,18 +1,19 @@
-/* ~ enhanced-widgets.css | by ANXETY ~ */
+/* ~ enhanced-widgets.css | by ANXETY - V3 Visual Overhaul ~ */
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
 
 :root {
-    --bg-color: linear-gradient(145deg, #330000 0%, #000000 100%);
-    --primary-widget-bg: #2a2a2a;
-    --secondary-widget-bg: #202020;
-    --border-color: #444;
-    --trim-color: #FFD700; /* Golden Yellow */
-    --text-color: #f0f0f0;
-    --text-color-secondary: #aaa;
-    --accent-color: #9370DB; /* Medium Purple */
-    --accent-hover: #a388ee;
-    --container-shadow: 0 4px 12px rgba(0,0,0,0.4);
-    --font-family: 'Inter', sans-serif;
+    /* --- Core Palette --- */
+    --bg-color: #121212; /* Overall background of the entire widget container */
+    --primary-widget-bg: #1E1E1E; /* Background for content areas inside tabs and accordions */
+    --secondary-widget-bg: #2C2C2C; /* Background for interactive elements like inactive tabs, buttons, and input fields */
+    --header-bg-color: #181818; /* Background for the top header bar with main toggles */
+    --border-color: #8B0000; /* Border color for all major panels and elements */
+    --text-color: #EAEAEA; /* Primary text color (e.g., button labels, main text) */
+    --text-color-secondary: #b0b0b0; /* Secondary text color for less important elements (e.g., inactive tabs, input labels) */
+    --accent-color: #8B0000; /* Main highlight color for active/selected elements (e.g., active tabs, selected buttons) */
+    --accent-hover: #A52A2A; /* Hover color for highlighted elements */
+    --container-shadow: 0 0 12px rgba(139, 0, 0, 0.5); /* The red "glow" effect around main panels */
+    --font-family: 'Inter', sans-serif; /* The font used throughout the UI */
 }
 
 /* --- Main Container --- */
@@ -24,33 +25,35 @@
     border: 1px solid var(--border-color);
     box-shadow: var(--container-shadow);
     color: var(--text-color);
+    display: flex;
+    gap: 16px;
 }
-
-/* --- Golden Trim --- */
-.trimmed-box {
-    border: 2px solid var(--trim-color);
-    box-shadow: 0 0 8px -2px var(--trim-color);
+.main-content {
+    flex-grow: 1;
+}
+.sidebar {
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
 }
 
 /* --- Header Controls --- */
 .header-controls {
     padding: 10px;
-    background-color: var(--secondary-widget-bg);
+    background-color: var(--header-bg-color);
     border-radius: 8px;
     margin-bottom: 16px;
     display: flex;
     align-items: center;
-    justify-content: space-between; /* Changed for new layout */
+    justify-content: space-between;
     flex-wrap: wrap;
     gap: 10px;
-}
-.header-controls .widget-dropdown,
-.header-controls .widget-checkbox,
-.header-controls .jupyter-button {
-    margin: 0;
+    border: 1px solid var(--border-color);
 }
 .header-controls .widget-checkbox label {
     font-size: 13px;
+    color: var(--text-color);
 }
 .header-left-group, .header-right-group {
     display: flex;
@@ -68,73 +71,93 @@
 }
 
 /* --- Tab Widget Styling --- */
+.selection-tabs {
+    border: 2px solid var(--border-color);
+    box-shadow: var(--container-shadow);
+    border-radius: 8px;
+}
 .p-TabBar .p-TabBar-tab {
     background: var(--secondary-widget-bg);
-    color: var(--text-color-secondary);
     border: 1px solid var(--border-color);
     border-bottom: none;
     padding: 10px 20px;
     font-size: 14px;
-    font-weight: 500;
+    font-weight: 600;
+    color: var(--text-color);
 }
 .p-TabBar .p-TabBar-tab.p-mod-current {
-    background: var(--primary-widget-bg);
+    background: var(--accent-color);
     color: var(--text-color);
-    border-color: var(--trim-color);
-    border-bottom: 1px solid var(--primary-widget-bg);
-    transform: translateY(2px);
+    border-color: var(--accent-hover);
+    border-bottom: 1px solid var(--accent-color);
 }
 .p-TabPanel {
     background: var(--primary-widget-bg);
-    border: 1px solid var(--border-color);
-    border-top: none;
     padding: 16px;
-    border-radius: 0 0 8px 8px;
+    border-radius: 0 0 6px 6px;
 }
 
-/* --- Checkbox Selection List --- */
-.checkbox-group {
+/* --- ToggleButton Selection List (FIXED) --- */
+.selection-group {
     background-color: var(--secondary-widget-bg);
     border-radius: 8px;
     padding: 10px;
-    height: 300px; /* Increased height */
+    height: 300px;
     overflow-y: auto;
     border: 1px solid var(--border-color);
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
 }
-.checkbox-group .widget-checkbox {
-    padding: 4px 8px;
-    border-radius: 4px;
-    transition: background-color 0.2s ease;
+.selection-group .widget-toggle-button {
+    width: 100%;
+    height: auto;
+    min-height: 32px;
+    background-color: #181818; /* Darker background for inactive */
+    border: 1px solid var(--border-color);
+    color: var(--text-color); /* White text for all states */
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 5px;
 }
-.checkbox-group .widget-checkbox:hover {
-    background-color: rgba(255, 255, 255, 0.05);
+.selection-group .widget-toggle-button:hover {
+    border-color: var(--accent-hover);
 }
-.checkbox-group .widget-checkbox label {
-    font-size: 13px;
-    white-space: normal; /* Allow text wrapping */
-    overflow: visible;
-    text-overflow: clip;
-    max-width: 100%;
-    display: block; /* Ensure label takes full width */
+.selection-group .widget-toggle-button.mod-active {
+    background-color: var(--accent-color);
+    border-color: var(--accent-hover);
+    color: var(--text-color);
+}
+.selection-group .widget-toggle-button .p-Button-label {
+    white-space: normal;
+    word-break: break-word; /* Use break-word for better wrapping */
+    text-align: center;
 }
 
+
 /* --- Accordion Styling --- */
+.trimmed-box.p-Accordion {
+    border: 2px solid var(--border-color);
+    box-shadow: var(--container-shadow);
+    border-radius: 8px;
+    margin-top: 16px;
+}
 .p-Accordion .p-Accordion-header {
     background: var(--secondary-widget-bg);
     color: var(--text-color);
-    border: 1px solid var(--border-color);
-    margin-top: 10px;
-    padding: 10px;
-    font-weight: 500;
+    border-bottom: 1px solid var(--border-color);
+    padding: 12px;
+    font-weight: 600;
 }
 .p-Accordion .p-Accordion-header.p-mod-selected {
     background: var(--accent-color);
+    border-color: var(--accent-hover);
 }
 .p-Accordion .p-Accordion-child {
     padding: 16px;
     background: var(--primary-widget-bg);
-    border: 1px solid var(--border-color);
-    border-top: none;
 }
 
 /* --- General Widget Styling --- */
@@ -156,6 +179,14 @@
 .jupyter-button {
     font-size: 12px;
 }
+.jupyter-button.mod-active {
+    background-color: var(--accent-color);
+    border-color: var(--accent-hover);
+    color: white;
+}
+.jupyter-button.mod-active:hover {
+    background-color: var(--accent-hover);
+}
 
 /* --- Save Button --- */
 .button_save {
@@ -165,14 +196,58 @@
     color: white;
     font-weight: 600;
     transition: background-color 0.2s ease;
+    border: 1px solid var(--accent-hover);
 }
 .button_save:hover {
     background-color: var(--accent-hover);
 }
+
+/* --- Sidebar Buttons --- */
+.side-button {
+    background-color: var(--secondary-widget-bg);
+    border: 1px solid var(--border-color);
+    color: var(--text-color);
+}
+.side-button.active {
+    background-color: var(--accent-color);
+    border-color: var(--accent-hover);
+}
+
+/* --- Notification Popup --- */
+.notification-popup {
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    z-index: 1000;
+    transition: opacity 0.3s, transform 0.3s;
+}
+.notification-popup.hidden {
+    opacity: 0;
+    transform: translateY(20px);
+    pointer-events: none;
+}
+.notification {
+    padding: 12px 16px;
+    border-radius: 6px;
+    color: white;
+    box-shadow: var(--container-shadow);
+}
+.notification .icon {
+    margin-right: 8px;
+}
+.notification.success { background-color: #10B981; }
+.notification.error { background-color: #EF4444; }
+.notification.info { background-color: #3B82F6; }
+.notification.warning { background-color: #F59E0B; }
 
 /* --- Hide Animation --- */
 .main-ui-container.hide {
     transition: opacity 0.5s, transform 0.5s;
     opacity: 0;
     transform: scale(0.95);
+}
+
+.divider {
+    border-color: var(--border-color);
+    margin: 10px 0;
 }
