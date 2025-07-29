@@ -19,7 +19,6 @@ CIVITAI_API_TOKEN = "9d333451a6148a1682349e326967efc2"
 
 nest_asyncio.apply()  # Async support for Jupyter
 
-
 # ======================== CONSTANTS =======================
 
 def detect_platform_home():
@@ -56,8 +55,7 @@ DEFAULT_BRANCH = 'main'
 DEFAULT_LANG = 'en'
 BASE_GITHUB_URL = "https://raw.githubusercontent.com"
 
-# --- COMPLETE FILE MANIFEST ---
-# This dictionary now contains every single file from the repository.
+# --- COMPLETE FILE MANIFEST - FIXED WITH UNDERSCORES ---
 FILE_STRUCTURE = {
     '': [
         'LICENSE',
@@ -95,22 +93,22 @@ FILE_STRUCTURE = {
         '_xl-models-data.py',
         'auto-cleaner.py',
         'download-result.py',
-        'downloading-en.py',
-        'enhanced-downloading-integration.py',
-        'enhanced-launch-integration.py',
-        'enhanced-launch.py',
-        'enhanced-setup.py',
-        'enhanced-widgets-en.py',
-        'enhanced-widgets-integration.py',
+        'downloading_en.py',  # Fixed: underscore instead of hyphen
+        'enhanced_downloading_integration.py',  # Fixed: underscore
+        'enhanced_launch_integration.py',  # Fixed: underscore
+        'enhanced_launch_en.py',  # Fixed: underscore
+        'enhanced_setup.py',
+        'enhanced_widgets_en.py',  # Fixed: underscore
+        'enhanced_widgets_integration.py',  # Fixed: underscore
         'enhanced_model_selector.py',
         'launch.py',
-        'master-integration.py',
-        'migrate-settings.py',
+        'master_integration.py',  # Fixed: underscore
+        'migrate_settings.py',  # Fixed: underscore
         'requirements.txt',
         'requirementsbackup.txt',
         'setup.py',
-        'webui-installer.py',
-        'widgets-en.py'
+        'webui_installer.py',  # Fixed: underscore
+        'widgets_en.py'  # Fixed: underscore
     ],
     '__configs__': {
         '': [
@@ -133,7 +131,6 @@ FILE_STRUCTURE = {
         'SD-UX': ['_extensions.txt', 'config.json', 'ui-config.json']
     }
 }
-
 
 # =================== UTILITY FUNCTIONS ====================
 def reinitialize_paths(base_path):
@@ -264,35 +261,48 @@ async def download_files_async(user, repo, branch, log_errors):
             if any(cf in str(e[1]) for e in errors for cf in critical_files):
                 raise RuntimeError(f"Critical files failed to download.")
 
-# ===================== MAIN EXECUTION =====================
-async def main_async(args=None):
-    parser = argparse.ArgumentParser(description='LSDAI Download Manager')
-    parser.add_argument('--lang', default=DEFAULT_LANG)
-    parser.add_argument('--branch', default=DEFAULT_BRANCH)
-    parser.add_argument('--fork', default=None)
-    parser.add_argument('-s', '--skip-download', action="store_true")
-    parser.add_argument('-l', "--log", action="store_true")
-    args, _ = parser.parse_known_args(args)
+# ================= MAIN SETUP FUNCTION ===================
+def run_original_setup(branch="main", fork_arg="", lang=DEFAULT_LANG, ignore_deps=False, log_errors=False):
+    """Main setup function - runs the original LSDAI setup process."""
+    env = detect_environment()
+    user, repo = parse_fork_arg(fork_arg)
+    
+    setup_module_folder()
+    print(f"🚀 LSDAI Setup | Environment: {env} | Branch: {branch}")
+    
+    # Save environment data
+    env_data = create_environment_data(env, lang, user, repo, branch)
+    save_env_to_json(env_data, SETTINGS_PATH)
+    
+    # Download all project files
     try:
-        env = detect_environment()
-        print(f"🌍 Detected environment: {env}")
-        print(f"📁 Using home directory: {HOME}")
-        user, repo = parse_fork_arg(args.fork)
-        if not args.skip_download:
-            await download_files_async(user, repo, args.branch, args.log)
-        setup_module_folder()
-        save_env_to_json(create_environment_data(env, args.lang, user, repo, args.branch), SETTINGS_PATH)
-        if CIVITAI_API_TOKEN:
-            os.environ['CIVITAI_API_TOKEN'] = CIVITAI_API_TOKEN
-        try:
-            from _season import display_info
-            display_info(env, os.environ['scr_path'], args.branch, args.lang, f"{user}/{repo}")
-        except ImportError as e:
-            print(f"Warning: Could not load season display: {e}")
-            print("Setup completed successfully!")
+        asyncio.run(download_files_async(user, repo, branch, log_errors))
+        print("✅ LSDAI setup completed successfully!")
+        return True
     except Exception as e:
-        print(f"Setup failed: {e}")
-        raise
+        print(f"❌ Setup failed: {e}")
+        return False
 
+# ================ CLI INTERFACE =================
 if __name__ == "__main__":
-    asyncio.run(main_async())
+    parser = argparse.ArgumentParser(description="LSDAI Setup Script")
+    parser.add_argument("--branch", default=DEFAULT_BRANCH, help="Git branch to use")
+    parser.add_argument("--fork", default="", help="GitHub fork in format: user/repo")
+    parser.add_argument("--lang", default=DEFAULT_LANG, help="Language code")
+    parser.add_argument("--ignore-deps", action="store_true", help="Skip dependency checks")
+    parser.add_argument("--log-errors", action="store_true", help="Show detailed error logs")
+    
+    args = parser.parse_args()
+    
+    success = run_original_setup(
+        branch=args.branch,
+        fork_arg=args.fork,
+        lang=args.lang,
+        ignore_deps=args.ignore_deps,
+        log_errors=args.log_errors
+    )
+    
+    if success:
+        print("🎉 Setup completed! You can now run the widgets and downloading scripts.")
+    else:
+        print("💥 Setup failed. Check the error messages above.")
