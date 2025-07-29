@@ -89,7 +89,7 @@ class WidgetManager:
 
     def create_api_token_box(self, description, placeholder, url, env_var):
         """Creates a consistent UI element for API tokens, checking for environment variables."""
-        widget = self.factory.create_text(description, '', placeholder)
+        widget = self.factory.create_text(description=description, value='', placeholder=placeholder)
         token_from_env = os.getenv(env_var)
         if token_from_env:
             widget.value = "Token set in Cell 1"
@@ -122,21 +122,22 @@ class WidgetManager:
     def build_ui(self):
         """Constructs and returns the entire widget UI."""
         
-        # --- HEADER CONTROLS ---
-        self.widgets['latest_webui'] = widgets.ToggleButton(value=True, description='Update WebUI', button_style='', icon='check-square-o')
-        self.widgets['latest_extensions'] = widgets.ToggleButton(value=True, description='Update Extensions', button_style='', icon='check-square-o')
-        self.widgets['inpainting_model'] = widgets.ToggleButton(value=False, description='Inpainting', button_style='', icon='square-o')
-        self.widgets['XL_models'] = widgets.ToggleButton(value=False, description='SDXL', button_style='', icon='square-o')
+        # --- HEADER CONTROLS (Single Line Layout using ToggleButtons) ---
+        self.widgets['latest_webui'] = widgets.ToggleButton(value=True, description='Update WebUI', button_style='')
+        self.widgets['latest_extensions'] = widgets.ToggleButton(value=True, description='Update Extensions', button_style='')
+        self.widgets['inpainting_model'] = widgets.ToggleButton(value=False, description='Inpainting', button_style='')
+        self.widgets['XL_models'] = widgets.ToggleButton(value=False, description='SDXL', button_style='')
+        self.widgets['detailed_download'] = widgets.ToggleButton(value=False, description='Detailed Output', button_style='')
         
-        left_toggles = self.factory.create_hbox([self.widgets['latest_webui'], self.widgets['latest_extensions']], class_names=['header-left-group'])
-        right_toggles = self.factory.create_hbox([self.widgets['inpainting_model'], self.widgets['XL_models']], class_names=['header-right-group'])
+        left_toggles = self.factory.create_hbox([self.widgets['latest_webui'], self.widgets['latest_extensions']], class_names=['header-group'])
+        right_toggles = self.factory.create_hbox([self.widgets['inpainting_model'], self.widgets['XL_models']], class_names=['header-group'])
         
-        self.widgets['change_webui'] = self.factory.create_dropdown(list(self.WEBUI_SELECTION.keys()), 'WebUI:', 'A1111')
-        self.widgets['detailed_download'] = widgets.ToggleButton(value=False, description='Detailed Output', button_style='', tooltip='Toggle detailed download logs', icon='info')
+        self.widgets['change_webui'] = self.factory.create_dropdown(options=list(self.WEBUI_SELECTION.keys()), description='WebUI:', value='A1111')
         
         header_controls = self.factory.create_hbox([
             left_toggles,
-            self.factory.create_vbox([self.widgets['change_webui'], self.widgets['detailed_download']], class_names=['header-center-group']),
+            self.widgets['change_webui'],
+            self.widgets['detailed_download'],
             right_toggles
         ], class_names=['header-controls'])
 
@@ -157,11 +158,11 @@ class WidgetManager:
         
         # --- ACCORDION FOR OTHER SETTINGS ---
         # 1. Additional Configuration (Now includes API Tokens)
-        self.widgets['check_custom_nodes_deps'] = self.factory.create_checkbox('Check ComfyUI Dependencies', True, layout={'display': 'none'})
-        self.widgets['commit_hash'] = self.factory.create_text('Commit Hash:', '', 'Optional: Use a specific commit')
-        self.widgets['commandline_arguments'] = self.factory.create_text('Arguments:', self.WEBUI_SELECTION['A1111'])
+        self.widgets['check_custom_nodes_deps'] = self.factory.create_checkbox(description='Check ComfyUI Dependencies', value=True, layout={'display': 'none'})
+        self.widgets['commit_hash'] = self.factory.create_text(description='Commit Hash:', placeholder='Optional: Use a specific commit')
+        self.widgets['commandline_arguments'] = self.factory.create_text(description='Arguments:', value=self.WEBUI_SELECTION['A1111'])
         accent_colors = ['anxety', 'blue', 'green', 'peach', 'pink', 'red', 'yellow']
-        self.widgets['theme_accent'] = self.factory.create_dropdown(accent_colors, 'Theme Accent:', 'anxety')
+        self.widgets['theme_accent'] = self.factory.create_dropdown(options=accent_colors, description='Theme Accent:', value='anxety')
         
         civitai_box, self.widgets['civitai_token'] = self.create_api_token_box('CivitAI Token:', 'Paste token here', 'https://civitai.com/user/account', 'CIVITAI_API_TOKEN')
         hf_box, self.widgets['huggingface_token'] = self.create_api_token_box('HuggingFace Token:', 'Paste token here', 'https://huggingface.co/settings/tokens', 'HUGGINGFACE_API_TOKEN')
@@ -176,15 +177,15 @@ class WidgetManager:
         ])
 
         # 2. Custom Download
-        self.widgets['empowerment'] = self.factory.create_checkbox('Empowerment Mode', False)
-        self.widgets['empowerment_output'] = self.factory.create_textarea('', '', 'Use special tags like $ckpt, $lora, etc.')
-        self.widgets['Model_url'] = self.factory.create_text('Model URL:')
-        self.widgets['Vae_url'] = self.factory.create_text('Vae URL:')
-        self.widgets['LoRA_url'] = self.factory.create_text('LoRA URL:')
-        self.widgets['Embedding_url'] = self.factory.create_text('Embedding URL:')
-        self.widgets['Extensions_url'] = self.factory.create_text('Extensions URL:')
-        self.widgets['ADetailer_url'] = self.factory.create_text('ADetailer URL:')
-        self.widgets['custom_file_urls'] = self.factory.create_text('File (txt):')
+        self.widgets['empowerment'] = self.factory.create_checkbox(description='Empowerment Mode', value=False)
+        self.widgets['empowerment_output'] = self.factory.create_textarea(description='', placeholder='Use special tags like $ckpt, $lora, etc.')
+        self.widgets['Model_url'] = self.factory.create_text(description='Model URL:')
+        self.widgets['Vae_url'] = self.factory.create_text(description='Vae URL:')
+        self.widgets['LoRA_url'] = self.factory.create_text(description='LoRA URL:')
+        self.widgets['Embedding_url'] = self.factory.create_text(description='Embedding URL:')
+        self.widgets['Extensions_url'] = self.factory.create_text(description='Extensions URL:')
+        self.widgets['ADetailer_url'] = self.factory.create_text(description='ADetailer URL:')
+        self.widgets['custom_file_urls'] = self.factory.create_text(description='File (txt):')
         self.custom_dl_container = self.factory.create_vbox([
             self.widgets['Model_url'], self.widgets['Vae_url'], self.widgets['LoRA_url'],
             self.widgets['Embedding_url'], self.widgets['Extensions_url'], self.widgets['ADetailer_url'],
@@ -201,20 +202,20 @@ class WidgetManager:
         accordion.add_class('trimmed-box')
 
         # --- SAVE BUTTON ---
-        save_button = self.factory.create_button('Save Settings', class_names=['button', 'button_save'])
+        save_button = self.factory.create_button(description='Save Settings', class_names=['button', 'button_save'])
         save_button.on_click(self.save_data)
 
         # --- SIDEBAR FOR G-DRIVE, IMPORT/EXPORT ---
         BTN_STYLE = {'width': '48px', 'height': '48px'}
         TOOLTIPS = ("Disconnect Google Drive", "Connect Google Drive")
         GD_status = js.read(SETTINGS_PATH, 'mountGDrive', False)
-        self.gdrive_button = self.factory.create_button('📁', layout=BTN_STYLE, class_names=['side-button'])
+        self.gdrive_button = self.factory.create_button(description='📁', layout=BTN_STYLE, class_names=['side-button'])
         self.gdrive_button.tooltip = TOOLTIPS[not GD_status]
         
-        self.export_button = self.factory.create_button('📤', layout=BTN_STYLE, class_names=['side-button'])
+        self.export_button = self.factory.create_button(description='📤', layout=BTN_STYLE, class_names=['side-button'])
         self.export_button.tooltip = "Export settings to JSON"
         
-        self.import_button = self.factory.create_button('📥', layout=BTN_STYLE, class_names=['side-button'])
+        self.import_button = self.factory.create_button(description='📥', layout=BTN_STYLE, class_names=['side-button'])
         self.import_button.tooltip = "Import settings from JSON"
 
         self.notification_popup = self.factory.create_html('', class_names=['notification-popup', 'hidden'])
