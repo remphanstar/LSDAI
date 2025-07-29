@@ -38,8 +38,8 @@ def detect_platform_home():
     else:
         # Default fallback - try to detect from current working directory
         cwd = Path.cwd()
-        if cwd.name == 'content':
-            return cwd
+        if cwd.name == 'ANXETY':
+            return cwd.parent
         elif 'content' in cwd.parts:
             return Path('/content')
         else:
@@ -47,7 +47,7 @@ def detect_platform_home():
 
 # FIXED: Platform-agnostic path detection
 HOME = detect_platform_home()
-SCR_PATH = HOME / 'LSDAI'
+SCR_PATH = HOME / 'ANXETY'
 SETTINGS_PATH = SCR_PATH / 'settings.json'
 VENV_PATH = HOME / 'venv'
 MODULES_FOLDER = SCR_PATH / "modules"
@@ -74,19 +74,20 @@ SUPPORTED_ENVS = {
     'LIGHTNING_AI': 'Lightning.ai'
 }
 
-# FIXED: File structure - scripts are now directly in scripts folder
+# FIXED: Moved enhanced_model_selector.py to the modules list
 FILE_STRUCTURE = {
     'CSS': ['main-widgets.css', 'download-result.css', 'auto-cleaner.css'],
     'JS': ['main-widgets.js'],
     'modules': [
         'json_utils.py', 'webui_utils.py', 'widget_factory.py',
-        'CivitaiAPI.py', 'Manager.py', 'TunnelHub.py', '_season.py'
+        'CivitaiAPI.py', 'Manager.py', 'TunnelHub.py', '_season.py',
+        'enhanced_model_selector.py'
     ],
     'scripts': [
         'widgets-en.py', 'downloading-en.py', 'webui-installer.py',
         'launch.py', 'download-result.py', 'auto-cleaner.py',
         '_models-data.py', '_xl-models-data.py', 'setup.py',
-        'enhanced_model_selector.py', 'requirements.txt'
+        'requirements.txt'
     ],
     '__configs__': {
         'A1111': ['config.json', 'ui-config.json', '_extensions.txt'],
@@ -112,7 +113,7 @@ def reinitialize_paths(base_path):
     """Re-initializes global path variables based on a new home directory."""
     global HOME, SCR_PATH, SETTINGS_PATH, VENV_PATH, MODULES_FOLDER
     HOME = base_path
-    SCR_PATH = HOME / 'LSDAI'
+    SCR_PATH = HOME / 'ANXETY'
     SETTINGS_PATH = SCR_PATH / 'settings.json'
     VENV_PATH = HOME / 'venv'
     MODULES_FOLDER = SCR_PATH / "modules"
