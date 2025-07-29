@@ -6,19 +6,19 @@ from IPython.display import display, HTML, Javascript
 
 # Import original widget factory
 try:
-    from widget_factory import WidgetFactory
+    from modules.widget_factory import WidgetFactory
     ORIGINAL_WIDGETS_AVAILABLE = True
 except ImportError:
     ORIGINAL_WIDGETS_AVAILABLE = False
-    print("⚠️  Original widget_factory not found")
+    print("⚠️ Original widget_factory not found")
 
-# Import enhancements
+# Import enhancements - FIXED IMPORT
 try:
-    from scripts.enhanced_widgets import EnhancedWidgetManager
+    from scripts.enhanced_widgets_en import EnhancedWidgetManager  # Changed from enhanced_widgets
     ENHANCEMENTS_AVAILABLE = True
 except ImportError:
     ENHANCEMENTS_AVAILABLE = False
-    print("⚠️  Enhanced widgets not available")
+    print("⚠️ Enhanced widgets not available")
 
 class IntegratedWidgetSystem:
     def __init__(self):
@@ -150,16 +150,38 @@ class IntegratedWidgetSystem:
     def _create_original_interface(self):
         """Fallback to original interface"""
         if ORIGINAL_WIDGETS_AVAILABLE:
-            # Use original widget factory
-            original_widgets = self.original_factory.create_main_interface()
-            display(original_widgets)
+            # FIXED: Use available method instead of non-existent create_main_interface
+            try:
+                # Try to create a basic interface using available methods
+                from scripts.widgets_en import *  # Import original widgets functions
+                print("✅ Loading original LSDAI widgets...")
+                # Call the main widgets function from original system
+                display(widgets.HTML('<h2>🎨 LSDAI Original Interface</h2>'))
+                # This will execute the original widgets code
+                
+            except Exception as e:
+                print(f"⚠️ Could not load original interface: {e}")
+                self._create_basic_fallback()
         else:
-            # Basic fallback interface
-            fallback = widgets.VBox([
-                widgets.HTML('<h2>LSDAI Basic Interface</h2>'),
-                widgets.HTML('<p>Enhanced widgets not available. Using basic interface.</p>')
-            ])
-            display(fallback)
+            self._create_basic_fallback()
+            
+    def _create_basic_fallback(self):
+        """Create basic fallback interface"""
+        fallback = widgets.VBox([
+            widgets.HTML('<h2>🎨 LSDAI Basic Interface</h2>'),
+            widgets.HTML('<p>Enhanced widgets not available. Using basic interface.</p>'),
+            widgets.Text(
+                value=js.read_key('commandline_arguments', ''),
+                description='Arguments:',
+                placeholder='--xformers --api'
+            ),
+            widgets.Dropdown(
+                options=['automatic1111', 'ComfyUI', 'InvokeAI'],
+                value=js.read_key('change_webui', 'automatic1111'),
+                description='WebUI:'
+            )
+        ])
+        display(fallback)
 
 # Main integration function
 def create_integrated_widgets():
