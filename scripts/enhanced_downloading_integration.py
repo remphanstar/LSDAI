@@ -1,68 +1,84 @@
-# ~ enhanced_downloading_integration.py | RAW DEBUG & VERBOSE OUTPUT VERSION ~
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Enhanced Downloading Integration - Fixed URL Processing
+LSDAI v2.0 Enhancement Suite - Download Management Script
+
+This script handles the complete download process for WebUI setup including:
+- Virtual environment setup with custom requirements
+- WebUI installation and updates  
+- Extension installation from URLs
+- Model and asset downloads with proper URL handling
+
+FIXED: Corrected URL processing to handle individual downloads instead of 
+concatenating multiple URLs into a single string
+"""
 
 import os
 import sys
-import json
-from pathlib import Path
-import time
 import subprocess
+import time
+from pathlib import Path
+import json
 
-# --- Setup Paths and Modules ---
-try:
-    SCR_PATH = Path(os.environ.get('scr_path', '/content/LSDAI'))
+# Setup environment paths
+HOME = Path(os.environ.get('home_path', '/content'))
+SCR_PATH = Path(os.environ.get('scr_path', HOME / 'LSDAI'))
+VENV_PATH = Path(os.environ.get('venv_path', HOME / 'venv'))
+SETTINGS_PATH = Path(os.environ.get('settings_path', SCR_PATH / 'settings.json'))
+SCRIPTS_PATH = SCR_PATH / 'scripts'
+
+# Add modules to Python path for imports
+if str(SCR_PATH / 'modules') not in sys.path:
     sys.path.insert(0, str(SCR_PATH / 'modules'))
-    
+
+# Import required modules
+try:
     import json_utils as js
-    from webui_utils import get_webui_config, get_current_webui, get_extensions_directory
+    from webui_utils import get_current_webui, get_webui_config, get_extensions_directory
     print("✅ Core modules imported successfully.")
 except ImportError as e:
-    print(f"❌ FATAL: Could not import a required module: {e}")
+    print(f"❌ Failed to import core modules: {e}")
+    print("   Make sure the LSDAI project structure is properly set up.")
     sys.exit(1)
 
-# --- Constants and Settings ---
-SETTINGS_PATH = Path(os.environ.get('settings_path'))
-HOME = Path(os.environ.get('home_path'))
-VENV_PATH = Path(os.environ.get('venv_path'))
-SCRIPTS_PATH = SCR_PATH / 'scripts'
-REQUIREMENTS_PATH = SCRIPTS_PATH / 'requirements.txt'
-
-# --- Main Execution Block ---
+# Enhanced downloader header
 print("--- LSDAI ENHANCED DOWNLOADER ---")
 print(f"Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}")
-print("="*35)
+print("===================================")
 
-# 1. ROBUST VIRTUAL ENVIRONMENT SETUP
-# ------------------------------------
+# 1. VIRTUAL ENVIRONMENT SETUP
+# -----------------------------
 print("\n🐍 1. Setting up Virtual Environment...")
 print(f"   - Target Venv Path: {VENV_PATH}")
 
 try:
-    if not (VENV_PATH / 'bin' / 'pip').exists():
-        if VENV_PATH.exists():
-            print(f"   - ⚠️ Found an incomplete venv. Removing it now.")
-            get_ipython().system(f'rm -rf "{VENV_PATH}"')
-        
-        # 1. Create venv without pip/ensurepip to avoid common errors
+    if not VENV_PATH.exists():
         print("   - Creating venv directory...")
-        subprocess.run([sys.executable, '-m', 'venv', str(VENV_PATH), '--without-pip'], check=True)
+        VENV_PATH.mkdir(parents=True, exist_ok=True)
         
-        # 2. Download get-pip.py for a reliable pip installation
+        # Create virtual environment
+        subprocess.run([sys.executable, '-m', 'venv', str(VENV_PATH)], 
+                      check=True, capture_output=False)
+        
+        # Setup pip in the virtual environment
+        pip_path = VENV_PATH / 'bin' / 'pip' if os.name != 'nt' else VENV_PATH / 'Scripts' / 'pip.exe'
+        
         print("   - Downloading get-pip.py...")
-        get_pip_path = SCR_PATH / "get-pip.py"
-        subprocess.run(['curl', '-sLo', str(get_pip_path), "https://bootstrap.pypa.io/get-pip.py"], check=True)
+        get_ipython().system('wget -q https://bootstrap.pypa.io/get-pip.py -O /tmp/get-pip.py')
         
-        # 3. Install pip using the venv's python interpreter
-        venv_python = VENV_PATH / 'bin' / 'python'
-        print(f"   - Installing pip into the virtual environment...")
-        subprocess.run([str(venv_python), str(get_pip_path)], check=True, capture_output=True, text=True)
+        print("   - Installing pip into the virtual environment...")
+        python_path = VENV_PATH / 'bin' / 'python' if os.name != 'nt' else VENV_PATH / 'Scripts' / 'python.exe'
+        subprocess.run([str(python_path), '/tmp/get-pip.py'], check=True)
         
-        # 4. Install dependencies from requirements.txt
-        if REQUIREMENTS_PATH.exists():
-            print(f"   - Installing dependencies from {REQUIREMENTS_PATH}...")
-            pip_executable = VENV_PATH / 'bin' / 'pip'
-            get_ipython().system(f'"{pip_executable}" install -r "{REQUIREMENTS_PATH}"')
+        # Install requirements
+        requirements_file = SCRIPTS_PATH / 'requirements.txt'
+        if requirements_file.exists():
+            print(f"   - Installing dependencies from {requirements_file}...")
+            subprocess.run([str(pip_path), 'install', '-r', str(requirements_file)], 
+                          check=True, capture_output=False)
         else:
-            print(f"   - ⚠️ WARNING: requirements.txt not found at {REQUIREMENTS_PATH}. Skipping.")
+            print("   - ⚠️ requirements.txt not found. Skipping dependency installation.")
     else:
         print("   - ✅ Venv with pip already exists. Skipping creation.")
 except Exception as e:
@@ -133,8 +149,8 @@ except Exception as e:
 print("   - Extension installation step complete.")
 
 
-# 4. MODEL & ASSET DOWNLOAD
-# -------------------------
+# 4. MODEL & ASSET DOWNLOAD - FIXED URL PROCESSING
+# ------------------------------------------------
 print("\n🎨 4. Downloading Models and Assets...")
 print("   - Reading from settings.json to download selected assets.")
 
@@ -145,9 +161,11 @@ try:
     model_files = '_xl_models_data.py' if WIDGETS_DATA.get('XL_models') else '_models_data.py'
     models_data_path = SCRIPTS_PATH / model_files
     
+    # Load model data if available
     local_vars = {}
-    with open(models_data_path) as f:
-        exec(f.read(), {}, local_vars)
+    if models_data_path.exists():
+        with open(models_data_path) as f:
+            exec(f.read(), {}, local_vars)
     
     model_list = local_vars.get('model_list', {})
     vae_list = local_vars.get('vae_list', {})
@@ -157,37 +175,76 @@ try:
     download_queue = []
 
     def add_to_queue(selection, data_dict):
-        if not selection or selection == ['none']: return
+        """Add selected items from data dictionary to download queue"""
+        if not selection or selection == ['none']: 
+            return
         
         items = selection if isinstance(selection, list) else [selection]
         for item_name in items:
             if item_name in data_dict:
                 data = data_dict[item_name]
                 if isinstance(data, dict):
-                    if data.get('url'): download_queue.append(data['url'])
+                    if data.get('url'): 
+                        download_queue.append(data['url'])
                 elif isinstance(data, list):
                     for sub_item in data:
-                        if sub_item.get('url'): download_queue.append(sub_item['url'])
+                        if isinstance(sub_item, dict) and sub_item.get('url'): 
+                            download_queue.append(sub_item['url'])
     
+    # Add pre-defined model selections to queue
     add_to_queue(WIDGETS_DATA.get('model'), model_list)
     add_to_queue(WIDGETS_DATA.get('vae'), vae_list)
     add_to_queue(WIDGETS_DATA.get('lora'), lora_list)
     add_to_queue(WIDGETS_DATA.get('controlnet'), controlnet_list)
     
+    # Add custom URLs from text fields
     for url_key in ['Model_url', 'Vae_url', 'LoRA_url', 'Embedding_url']:
-        urls = WIDGETS_DATA.get(url_key, '')
-        if urls:
-            download_queue.extend([url.strip() for url in urls.split(',') if url.strip()])
+        urls_string = WIDGETS_DATA.get(url_key, '')
+        if urls_string and urls_string.strip():
+            # Split by comma and clean up each URL
+            custom_urls = [url.strip() for url in urls_string.split(',') if url.strip()]
+            download_queue.extend(custom_urls)
 
+    # Process downloads - FIXED: Handle each URL individually
     if not download_queue:
         print("   - No models selected for download.")
     else:
         print(f"   - Starting download of {len(download_queue)} item(s)...")
-        download_command = " ".join([f'"{url}"' for url in download_queue])
-        m_download(download_command, log=True, unzip=True)
+        
+        successful_downloads = 0
+        failed_downloads = 0
+        
+        for i, url in enumerate(download_queue, 1):
+            try:
+                print(f"\n   - [{i}/{len(download_queue)}] Processing: {url}")
+                
+                # FIXED: Call m_download for each URL individually
+                success = m_download(url, log=True, unzip=True)
+                
+                if success:
+                    successful_downloads += 1
+                    print(f"     ✅ Download successful")
+                else:
+                    failed_downloads += 1
+                    print(f"     ❌ Download failed")
+                    
+            except Exception as e:
+                failed_downloads += 1
+                print(f"     ❌ Download error: {e}")
+        
+        # Summary report
+        print(f"\n   📊 Download Summary:")
+        print(f"      - Total items: {len(download_queue)}")
+        print(f"      - Successful: {successful_downloads}")
+        print(f"      - Failed: {failed_downloads}")
+        
+        if failed_downloads > 0:
+            print(f"      ⚠️ {failed_downloads} downloads failed. Check the URLs and try again.")
     
 except Exception as e:
     print(f"   - ❌ ERROR during model download phase: {e}")
+    import traceback
+    print(f"   - Full error details: {traceback.format_exc()}")
 
 print("   - Model download step complete.")
 
