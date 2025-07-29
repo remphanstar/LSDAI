@@ -1,546 +1,493 @@
-# Enhanced Manager Module with Real-time Progress Tracking
-# Save as: modules/EnhancedManager.py
+# EnhancedManager.py - Enhanced Download Manager with Progress Tracking
+# Provides advanced download functionality with real-time progress tracking
 
-import json_utils as js
-from Manager import m_download, m_clone  # Import existing functionality
-from CivitaiAPI import CivitAiAPI
-
-from urllib.parse import urlparse
-from pathlib import Path
-import subprocess
-import threading
-import tempfile
-import zipfile
-import shlex
+import os
 import time
 import json
-import sys
-import re
-import os
+import threading
+import subprocess
+from pathlib import Path
+from typing import Dict, List, Optional, Callable, Tuple
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from queue import Queue
+import requests
 
-class ProgressTracker:
-    """Real-time progress tracking for downloads"""
+# Import base manager functionality
+try:
+    from Manager import m_download, m_clone
+    BASE_MANAGER_AVAILABLE = True
+except ImportError:
+    BASE_MANAGER_AVAILABLE = False
+    print("Warning: Base Manager.py not available")
+
+# Import notification system
+try:
+    from NotificationSystem import send_info, send_success, send_error, ProgressNotifier
+    NOTIFICATIONS_AVAILABLE = True
+except ImportError:
+    NOTIFICATIONS_AVAILABLE = False
+
+# Import JSON utilities
+try:
+    import json_utils as js
+    JSON_UTILS_AVAILABLE = True
+except ImportError:
+    JSON_UTILS_AVAILABLE = False
+
+# Get environment paths
+HOME = Path(os.environ.get('home_path', '/content'))
+SCR_PATH = Path(os.environ.get('scr_path', HOME / 'LSDAI'))
+VENV_PATH = Path(os.environ.get('venv_path', HOME / 'venv'))
+
+class DownloadProgressTracker:
+    """Track download progress with callbacks"""
     
-    def __init__(self):
-        self.downloads = {}
+    def __init__(self, url: str, filename: str):
+        self.url = url
+        self.filename = filename
+        self.total_size = 0
+        self.downloaded_size = 0
+        self.start_time = time.time()
         self.callbacks = []
-        self.total_progress = 0
-        self.active_downloads = 0
-        
-    def add_callback(self, callback):
-        """Add progress callback function"""
+        self.completed = False
+        self.failed = False
+        self.error_message = ""
+    
+    def add_callback(self, callback: Callable):
+        """Add progress callback"""
         self.callbacks.append(callback)
-        
-    def start_download(self, download_id, name, total_size=0):
-        """Start tracking a new download"""
-        self.downloads[download_id] = {
-            'name': name,
-            'progress': 0,
-            'speed': 0,
-            'eta': 0,
-            'status': 'starting',
-            'total_size': total_size,
-            'downloaded': 0,
-            'start_time': time.time()
-        }
-        self.active_downloads += 1
-        self._notify_callbacks()
-        
-    def update_progress(self, download_id, downloaded, speed=0):
+    
+    def update_progress(self, downloaded: int, total: int = None):
         """Update download progress"""
-        if download_id not in self.downloads:
-            return
-            
-        download = self.downloads[download_id]
-        download['downloaded'] = downloaded
-        download['speed'] = speed
-        download['status'] = 'downloading'
+        self.downloaded_size = downloaded
+        if total:
+            self.total_size = total
         
-        if download['total_size'] > 0:
-            download['progress'] = (downloaded / download['total_size']) * 100
-            remaining = download['total_size'] - downloaded
-            download['eta'] = remaining / speed if speed > 0 else 0
+        progress_data = {
+            'url': self.url,
+            'filename': self.filename,
+            'downloaded': self.downloaded_size,
+            'total': self.total_size,
+            'progress': (self.downloaded_size / self.total_size * 100) if self.total_size > 0 else 0,
+            'speed': self._calculate_speed(),
+            'eta': self._calculate_eta()
+        }
         
-        self._calculate_total_progress()
-        self._notify_callbacks()
-        
-    def complete_download(self, download_id, success=True):
-        """Mark download as completed"""
-        if download_id not in self.downloads:
-            return
-            
-        download = self.downloads[download_id]
-        download['progress'] = 100
-        download['status'] = 'completed' if success else 'failed'
-        download['speed'] = 0
-        download['eta'] = 0
-        
-        self.active_downloads = max(0, self.active_downloads - 1)
-        self._calculate_total_progress()
-        self._notify_callbacks()
-        
-    def _calculate_total_progress(self):
-        """Calculate overall progress across all downloads"""
-        if not self.downloads:
-            self.total_progress = 0
-            return
-            
-        total_progress = sum(d['progress'] for d in self.downloads.values())
-        self.total_progress = total_progress / len(self.downloads)
-        
-    def _notify_callbacks(self):
-        """Notify all registered callbacks of progress updates"""
         for callback in self.callbacks:
             try:
-                callback(self.get_status())
+                callback(progress_data)
             except Exception as e:
                 print(f"Progress callback error: {e}")
-                
-    def get_status(self):
-        """Get current download status"""
-        return {
-            'downloads': dict(self.downloads),
-            'total_progress': self.total_progress,
-            'active_downloads': self.active_downloads
-        }
+    
+    def mark_completed(self):
+        """Mark download as completed"""
+        self.completed = True
+        self.update_progress(self.total_size, self.total_size)
+    
+    def mark_failed(self, error: str):
+        """Mark download as failed"""
+        self.failed = True
+        self.error_message = error
+    
+    def _calculate_speed(self) -> float:
+        """Calculate download speed in bytes/second"""
+        elapsed = time.time() - self.start_time
+        if elapsed > 0:
+            return self.downloaded_size / elapsed
+        return 0
+    
+    def _calculate_eta(self) -> float:
+        """Calculate estimated time to completion in seconds"""
+        if self.total_size <= 0 or self.downloaded_size <= 0:
+            return 0
+        
+        speed = self._calculate_speed()
+        if speed > 0:
+            remaining_bytes = self.total_size - self.downloaded_size
+            return remaining_bytes / speed
+        return 0
 
-class EnhancedDownloadManager:
-    """Enhanced download manager with queue, progress tracking, and advanced features"""
+class BatchDownloadOperations:
+    """Handle batch download operations"""
     
     def __init__(self):
-        self.progress_tracker = ProgressTracker()
-        self.download_queue = []
+        self.download_queue = Queue()
         self.active_downloads = {}
-        self.max_concurrent = 3
-        self.failed_downloads = []
         self.completed_downloads = []
-        self.paused = False
-        self.civitai_api = None
-        self._load_settings()
-        
-    def _load_settings(self):
-        """Load settings from configuration"""
-        try:
-            settings = js.read(js.SETTINGS_PATH)
-            token = settings.get('WIDGETS', {}).get('civitai_token') or os.getenv('CIVITAI_API_TOKEN')
-            if token and token != "Set in setup.py":
-                self.civitai_api = CivitAiAPI(token)
-            
-            # Load download settings
-            self.max_concurrent = settings.get('WIDGETS', {}).get('concurrent_downloads', 3)
-            self.auto_retry = settings.get('WIDGETS', {}).get('auto_retry', True)
-            
-        except Exception as e:
-            print(f"Warning: Could not load settings: {e}")
-            
-    def add_progress_callback(self, callback):
-        """Add callback for progress updates"""
-        self.progress_tracker.add_callback(callback)
-        
-    def add_to_queue(self, items):
-        """Add items to download queue"""
-        if isinstance(items, str):
-            items = [items]
-            
-        for item in items:
-            download_item = self._parse_download_item(item)
-            if download_item:
-                self.download_queue.append(download_item)
-                
-        return len(items)
-        
-    def _parse_download_item(self, item):
-        """Parse download item string into structured data"""
-        parts = item.split(',')
-        if len(parts) < 2:
-            return None
-            
-        url = parts[0].strip().strip('"')
-        destination = parts[1].strip().strip('"')
-        filename = parts[2].strip().strip('"') if len(parts) > 2 else None
-        
-        # Generate unique ID for tracking
-        download_id = f"dl_{int(time.time() * 1000)}_{len(self.download_queue)}"
-        
-        return {
-            'id': download_id,
-            'url': url,
-            'destination': destination,
-            'filename': filename,
-            'status': 'queued',
-            'retries': 0,
-            'max_retries': 3 if self.auto_retry else 0
-        }
-        
-    def start_queue(self):
-        """Start processing the download queue"""
-        self.paused = False
-        
-        # Start download workers
-        for i in range(min(self.max_concurrent, len(self.download_queue))):
-            if len(self.active_downloads) < self.max_concurrent:
-                self._start_next_download()
-                
-    def pause_queue(self):
-        """Pause download queue processing"""
-        self.paused = True
-        
-    def clear_queue(self):
-        """Clear the download queue"""
-        self.download_queue.clear()
-        
-    def _start_next_download(self):
-        """Start the next download from queue"""
-        if self.paused or len(self.active_downloads) >= self.max_concurrent:
+        self.failed_downloads = []
+        self.max_concurrent = 3
+        self.executor = None
+    
+    def add_urls(self, urls: List[str]):
+        """Add multiple URLs to download queue"""
+        for url in urls:
+            if url.strip():
+                self.download_queue.put(url.strip())
+    
+    def start_batch_download(self, progress_callback: Optional[Callable] = None):
+        """Start batch download process"""
+        if self.download_queue.empty():
+            print("No URLs in download queue")
             return
-            
-        # Find next queued item
-        queued_items = [item for item in self.download_queue if item['status'] == 'queued']
-        if not queued_items:
-            return
-            
-        item = queued_items[0]
-        item['status'] = 'downloading'
-        self.active_downloads[item['id']] = item
         
-        # Start download in thread
-        thread = threading.Thread(target=self._download_worker, args=(item,))
-        thread.daemon = True
-        thread.start()
+        total_items = self.download_queue.qsize()
+        print(f"Starting batch download of {total_items} items...")
         
-    def _download_worker(self, item):
-        """Worker thread for individual downloads"""
+        if NOTIFICATIONS_AVAILABLE:
+            send_info("Batch Download", f"Starting download of {total_items} items")
+        
+        self.executor = ThreadPoolExecutor(max_workers=self.max_concurrent)
+        futures = []
+        
+        # Submit download tasks
+        while not self.download_queue.empty():
+            url = self.download_queue.get()
+            future = self.executor.submit(self._download_with_tracking, url, progress_callback)
+            futures.append(future)
+        
+        # Wait for completion
+        completed_count = 0
+        for future in as_completed(futures):
+            completed_count += 1
+            try:
+                result = future.result()
+                if result['success']:
+                    self.completed_downloads.append(result)
+                else:
+                    self.failed_downloads.append(result)
+                
+                if progress_callback:
+                    batch_progress = {
+                        'completed': completed_count,
+                        'total': total_items,
+                        'progress': (completed_count / total_items) * 100,
+                        'latest_result': result
+                    }
+                    progress_callback(batch_progress)
+                    
+            except Exception as e:
+                print(f"Batch download error: {e}")
+        
+        # Summary
+        success_count = len(self.completed_downloads)
+        failed_count = len(self.failed_downloads)
+        
+        if NOTIFICATIONS_AVAILABLE:
+            if failed_count == 0:
+                send_success("Batch Download Complete", f"All {success_count} downloads completed successfully")
+            else:
+                send_info("Batch Download Complete", f"{success_count} successful, {failed_count} failed")
+        
+        self.executor.shutdown()
+        return {'success': success_count, 'failed': failed_count}
+    
+    def _download_with_tracking(self, url: str, progress_callback: Optional[Callable] = None):
+        """Download URL with progress tracking"""
+        filename = os.path.basename(url.split('?')[0]) or f"download_{int(time.time())}"
+        
+        tracker = DownloadProgressTracker(url, filename)
+        if progress_callback:
+            tracker.add_callback(progress_callback)
+        
         try:
-            success = self._execute_download(item)
+            # Use base manager if available
+            if BASE_MANAGER_AVAILABLE:
+                success = m_download(url, log=True)
+            else:
+                success = self._basic_download(url, tracker)
             
             if success:
-                item['status'] = 'completed'
-                self.completed_downloads.append(item)
-                self.progress_tracker.complete_download(item['id'], True)
+                tracker.mark_completed()
+                return {'success': True, 'url': url, 'filename': filename}
             else:
-                if item['retries'] < item['max_retries']:
-                    item['retries'] += 1
-                    item['status'] = 'queued'  # Retry
-                    print(f"Retrying download: {item['filename']} (attempt {item['retries']})")
-                else:
-                    item['status'] = 'failed'
-                    self.failed_downloads.append(item)
-                    self.progress_tracker.complete_download(item['id'], False)
-                    
+                tracker.mark_failed("Download failed")
+                return {'success': False, 'url': url, 'filename': filename, 'error': 'Download failed'}
+                
         except Exception as e:
-            print(f"Download worker error: {e}")
-            item['status'] = 'failed'
-            self.failed_downloads.append(item)
-            self.progress_tracker.complete_download(item['id'], False)
-            
-        finally:
-            # Remove from active downloads
-            if item['id'] in self.active_downloads:
-                del self.active_downloads[item['id']]
-                
-            # Start next download if available
-            if not self.paused:
-                self._start_next_download()
-                
-    def _execute_download(self, item):
-        """Execute individual download with progress tracking"""
-        download_id = item['id']
-        url = item['url']
-        destination = item['destination']
-        filename = item['filename']
-        
-        # Handle CivitAI URLs
-        if 'civitai.com' in url and self.civitai_api:
-            print(f"Processing CivitAI URL: {url}")
-            try:
-                model_data = self.civitai_api.validate_download(url, filename)
-                if model_data:
-                    url = model_data.download_url
-                    filename = model_data.model_name
-                    
-                    # Start progress tracking
-                    self.progress_tracker.start_download(
-                        download_id, 
-                        filename or 'Unknown',
-                        self._estimate_file_size(model_data.model_type)
-                    )
-                else:
-                    print(f"Failed to get CivitAI download data")
-                    return False
-            except Exception as e:
-                print(f"CivitAI processing error: {e}")
-                return False
-        else:
-            # Start progress tracking for regular downloads
-            self.progress_tracker.start_download(download_id, filename or 'Unknown')
-            
-        # Create destination directory
-        os.makedirs(destination, exist_ok=True)
-        
-        # Execute download with progress monitoring
-        return self._download_with_progress(url, destination, filename, download_id)
-        
-    def _download_with_progress(self, url, destination, filename, download_id):
-        """Download file with progress monitoring"""
+            tracker.mark_failed(str(e))
+            return {'success': False, 'url': url, 'filename': filename, 'error': str(e)}
+    
+    def _basic_download(self, url: str, tracker: DownloadProgressTracker) -> bool:
+        """Basic download implementation with progress tracking"""
         try:
-            # Use aria2c for better progress tracking
-            cmd = self._build_aria2_command(url, destination, filename)
+            response = requests.get(url, stream=True, timeout=30)
+            response.raise_for_status()
             
-            process = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                universal_newlines=True,
-                bufsize=1
-            )
+            # Determine file path
+            filename = tracker.filename
+            download_dir = HOME / 'downloads'
+            download_dir.mkdir(exist_ok=True)
+            filepath = download_dir / filename
             
-            # Monitor progress
-            while True:
-                line = process.stderr.readline() if process.stderr else ""
-                if line == '' and process.poll() is not None:
-                    break
-                    
-                if line:
-                    self._parse_aria2_progress(line, download_id)
-                    
-            return process.returncode == 0
+            total_size = int(response.headers.get('content-length', 0))
+            tracker.total_size = total_size
+            
+            downloaded_size = 0
+            with open(filepath, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+                        downloaded_size += len(chunk)
+                        tracker.update_progress(downloaded_size, total_size)
+            
+            return True
             
         except Exception as e:
-            print(f"Download execution error: {e}")
+            print(f"Basic download error: {e}")
             return False
-            
-    def _build_aria2_command(self, url, destination, filename):
-        """Build aria2c command with proper parameters"""
-        cmd = [
-            'aria2c',
-            '--console-log-level=warn',
-            '--summary-interval=1',
-            '--download-result=hide',
-            f'--dir={destination}',
-            '--allow-overwrite=true',
-            '--auto-file-renaming=false',
-            '-x16', '-s16', '-j1',  # Connection settings
-        ]
-        
-        if filename:
-            cmd.extend(['-o', filename])
-            
-        # Add headers for better compatibility
-        cmd.extend([
-            '--header=User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            '--header=Accept: */*'
-        ])
-        
-        cmd.append(url)
-        return cmd
-        
-    def _parse_aria2_progress(self, line, download_id):
-        """Parse aria2c output for progress information"""
-        # Parse download progress from aria2c output
-        # Format: [#abcdef 1.2MiB/5.0MiB(24%) CN:1 DL:500KiB ETA:8s]
-        
-        progress_pattern = r'\[.*?(\d+\.?\d*[KMGT]?iB)/(\d+\.?\d*[KMGT]?iB)\((\d+)%\).*?DL:(\d+\.?\d*[KMGT]?iB).*?\]'
-        match = re.search(progress_pattern, line)
-        
-        if match:
-            downloaded_str, total_str, percent, speed_str = match.groups()
-            
-            try:
-                downloaded = self._parse_size(downloaded_str)
-                speed = self._parse_size(speed_str)
-                
-                self.progress_tracker.update_progress(download_id, downloaded, speed)
-                
-            except Exception as e:
-                pass  # Ignore parsing errors
-                
-    def _parse_size(self, size_str):
-        """Parse size string (e.g., '1.5MiB') to bytes"""
-        size_str = size_str.replace('iB', 'B')
-        
-        multipliers = {
-            'B': 1,
-            'KB': 1024,
-            'MB': 1024**2,
-            'GB': 1024**3,
-            'TB': 1024**4
-        }
-        
-        for unit, multiplier in multipliers.items():
-            if size_str.endswith(unit):
-                number = float(size_str[:-len(unit)])
-                return int(number * multiplier)
-                
-        return int(float(size_str))
-        
-    def _estimate_file_size(self, model_type):
-        """Estimate file size based on model type"""
-        size_estimates = {
-            'Checkpoint': 2.1 * 1024**3,  # ~2.1 GB
-            'LORA': 144 * 1024**2,        # ~144 MB
-            'VAE': 334 * 1024**2,         # ~334 MB
-            'ControlNet': 1.4 * 1024**3,  # ~1.4 GB
-            'Embedding': 10 * 1024**2     # ~10 MB
-        }
-        
-        return size_estimates.get(model_type, 100 * 1024**2)  # Default 100MB
-        
-    def get_queue_status(self):
-        """Get current queue status"""
-        return {
-            'total_items': len(self.download_queue),
-            'queued': len([item for item in self.download_queue if item['status'] == 'queued']),
-            'downloading': len(self.active_downloads),
-            'completed': len(self.completed_downloads),
-            'failed': len(self.failed_downloads),
-            'progress': self.progress_tracker.get_status()
-        }
-        
-    def get_queue_items(self):
-        """Get all queue items with status"""
-        return self.download_queue
-        
-    def remove_from_queue(self, download_id):
-        """Remove item from queue"""
-        self.download_queue = [item for item in self.download_queue if item['id'] != download_id]
-        
-    def retry_failed(self):
-        """Retry all failed downloads"""
-        for item in self.failed_downloads:
-            item['status'] = 'queued'
-            item['retries'] = 0
-            self.download_queue.append(item)
-            
-        self.failed_downloads.clear()
-        
-class BatchOperations:
-    """Batch operations for model management"""
-    
-    def __init__(self, download_manager):
-        self.download_manager = download_manager
-        
-    def download_all_models(self, model_data):
-        """Download all available models"""
-        download_items = []
-        
-        for category in ['model_list', 'vae_list', 'lora_list', 'controlnet_list']:
-            if category in model_data:
-                items = model_data[category]
-                for models in items.values():
-                    if isinstance(models, list):
-                        for model in models:
-                            if isinstance(model, dict) and 'url' in model:
-                                item = f"{model['url']},{model.get('dst', '')},{model.get('name', '')}"
-                                download_items.append(item)
-                                
-        return self.download_manager.add_to_queue(download_items)
-        
-    def download_by_type(self, model_data, model_type):
-        """Download all models of specific type"""
-        type_map = {
-            'checkpoint': 'model_list',
-            'vae': 'vae_list', 
-            'lora': 'lora_list',
-            'controlnet': 'controlnet_list'
-        }
-        
-        if model_type not in type_map:
-            return 0
-            
-        category = type_map[model_type]
-        if category not in model_data:
-            return 0
-            
-        download_items = []
-        items = model_data[category]
-        
-        for models in items.values():
-            if isinstance(models, list):
-                for model in models:
-                    if isinstance(model, dict) and 'url' in model:
-                        item = f"{model['url']},{model.get('dst', '')},{model.get('name', '')}"
-                        download_items.append(item)
-                        
-        return self.download_manager.add_to_queue(download_items)
-        
-    def organize_models(self, base_path):
-        """Organize downloaded models by type"""
-        # Implementation for organizing models into proper directories
-        print("Organizing models by type...")
-        
-    def check_duplicates(self, base_path):
-        """Check for duplicate model files"""
-        # Implementation for finding duplicate models
-        print("Checking for duplicate models...")
-        
-    def verify_integrity(self, base_path):
-        """Verify model file integrity"""
-        # Implementation for verifying model files
-        print("Verifying model integrity...")
 
-# Integration with existing system
-def create_enhanced_download_system():
-    """Create enhanced download system integrated with existing Manager"""
+class EnhancedDownloadManager:
+    """Enhanced download manager with advanced features"""
     
-    # Create enhanced manager
-    enhanced_manager = EnhancedDownloadManager()
+    def __init__(self):
+        self.batch_ops = BatchDownloadOperations()
+        self.progress_callbacks = []
+        self.download_history = []
+        self.active_downloads = {}
+        
+        # Load settings
+        self.webui_type = self._get_webui_type()
+        
+    def _get_webui_type(self) -> str:
+        """Get current WebUI type from settings"""
+        if JSON_UTILS_AVAILABLE:
+            return js.read_key('change_webui', 'automatic1111')
+        return 'automatic1111'
     
-    # Create batch operations
-    batch_ops = BatchOperations(enhanced_manager)
+    def add_progress_callback(self, callback: Callable):
+        """Add progress callback for all downloads"""
+        self.progress_callbacks.append(callback)
     
-    # Progress callback for JavaScript integration
-    def progress_callback(status):
-        """Send progress updates to JavaScript"""
+    def setup_enhanced_venv(self) -> bool:
+        """Setup enhanced virtual environment"""
+        print("🐍 Setting up enhanced virtual environment...")
+        
+        # This is a placeholder - the actual venv setup is handled by downloading_en.py
+        # We just verify that the venv exists or can be created
+        
+        if VENV_PATH.exists():
+            print("✅ Virtual environment found")
+            return True
+        else:
+            print("⚠️ Virtual environment not found, will use system Python")
+            return False
+    
+    def download_models_with_progress(self) -> bool:
+        """Download models with enhanced progress tracking"""
+        print("🎨 Starting enhanced model downloads...")
+        
+        if not JSON_UTILS_AVAILABLE:
+            print("❌ Cannot read settings - json_utils not available")
+            return False
+        
+        # Get model URLs from settings
+        settings_data = js.read(js.get_settings_path(), 'WIDGETS', {})
+        
+        url_keys = ['Model_url', 'Vae_url', 'LoRA_url', 'Embedding_url', 'Extensions_url']
+        all_urls = []
+        
+        for key in url_keys:
+            urls_string = settings_data.get(key, '')
+            if urls_string:
+                urls = [url.strip() for url in urls_string.split(',') if url.strip()]
+                all_urls.extend(urls)
+        
+        if not all_urls:
+            print("⚠️ No model URLs found in settings")
+            return True
+        
+        print(f"📥 Found {len(all_urls)} URLs to download")
+        
+        # Setup progress tracking
+        if NOTIFICATIONS_AVAILABLE:
+            progress_notifier = ProgressNotifier("Model Downloads", len(all_urls))
+        
+        def progress_callback(data):
+            """Handle progress updates"""
+            if 'completed' in data:  # Batch progress
+                if NOTIFICATIONS_AVAILABLE:
+                    progress_notifier.update(data['completed'], f"Downloaded {data['completed']}/{data['total']} items")
+            
+            # Call registered callbacks
+            for callback in self.progress_callbacks:
+                try:
+                    callback(data)
+                except Exception as e:
+                    print(f"Progress callback error: {e}")
+        
+        # Start batch download
+        self.batch_ops.add_urls(all_urls)
+        results = self.batch_ops.start_batch_download(progress_callback)
+        
+        # Complete progress tracking
+        if NOTIFICATIONS_AVAILABLE:
+            if results['failed'] == 0:
+                progress_notifier.complete(f"All {results['success']} downloads completed")
+            else:
+                progress_notifier.complete(f"{results['success']} successful, {results['failed']} failed")
+        
+        return results['failed'] == 0
+    
+    def install_webui_enhanced(self, webui_type: Optional[str] = None) -> bool:
+        """Install WebUI with enhanced progress tracking"""
+        if webui_type is None:
+            webui_type = self.webui_type
+        
+        print(f"🚀 Installing {webui_type} with enhanced tracking...")
+        
+        webui_configs = {
+            'automatic1111': {
+                'url': 'https://github.com/AUTOMATIC1111/stable-diffusion-webui.git',
+                'path': HOME / 'stable-diffusion-webui'
+            },
+            'ComfyUI': {
+                'url': 'https://github.com/comfyanonymous/ComfyUI.git', 
+                'path': HOME / 'ComfyUI'
+            }
+        }
+        
+        config = webui_configs.get(webui_type)
+        if not config:
+            print(f"❌ Unknown WebUI type: {webui_type}")
+            return False
+        
+        if config['path'].exists():
+            print(f"✅ {webui_type} already installed")
+            return True
+        
+        # Clone with progress tracking
+        if NOTIFICATIONS_AVAILABLE:
+            send_info("WebUI Installation", f"Cloning {webui_type}...")
+        
         try:
-            # This would send updates to the JavaScript frontend
-            # In a real implementation, this might use WebSockets or SSE
-            from IPython.display import Javascript, display
+            if BASE_MANAGER_AVAILABLE:
+                success = m_clone(config['url'])
+            else:
+                # Basic git clone
+                cmd = ['git', 'clone', config['url'], str(config['path'])]
+                result = subprocess.run(cmd, capture_output=True, text=True)
+                success = result.returncode == 0
             
-            js_code = f"""
-            if (window.enhancedWidgetManager) {{
-                window.enhancedWidgetManager.updateDownloadProgress({json.dumps(status)});
-            }}
-            """
-            display(Javascript(js_code))
-            
+            if success:
+                if NOTIFICATIONS_AVAILABLE:
+                    send_success("WebUI Installation", f"{webui_type} installed successfully")
+                return True
+            else:
+                if NOTIFICATIONS_AVAILABLE:
+                    send_error("WebUI Installation", f"Failed to install {webui_type}")
+                return False
+                
         except Exception as e:
-            pass  # Ignore display errors in non-notebook environments
-            
-    enhanced_manager.add_progress_callback(progress_callback)
+            print(f"WebUI installation error: {e}")
+            if NOTIFICATIONS_AVAILABLE:
+                send_error("WebUI Installation", f"Installation failed: {str(e)}")
+            return False
     
-    return enhanced_manager, batch_ops
-
-# Global instance for easy access
-enhanced_download_manager = None
-batch_operations = None
-
-def get_enhanced_manager():
-    """Get or create enhanced download manager"""
-    global enhanced_download_manager, batch_operations
-    
-    if enhanced_download_manager is None:
-        enhanced_download_manager, batch_operations = create_enhanced_download_system()
+    def get_download_stats(self) -> Dict:
+        """Get enhanced download statistics"""
+        stats = {
+            'total_downloads': len(self.download_history),
+            'successful_downloads': len([d for d in self.download_history if d.get('success', False)]),
+            'failed_downloads': len([d for d in self.download_history if not d.get('success', False)]),
+            'active_downloads': len(self.active_downloads),
+            'batch_completed': len(self.batch_ops.completed_downloads),
+            'batch_failed': len(self.batch_ops.failed_downloads)
+        }
         
-    return enhanced_download_manager, batch_operations
-
-# Backward compatibility with existing Manager.py
-def enhanced_m_download(line=None, log=False, unzip=False):
-    """Enhanced version of m_download with progress tracking"""
-    manager, _ = get_enhanced_manager()
+        if stats['total_downloads'] > 0:
+            stats['success_rate'] = (stats['successful_downloads'] / stats['total_downloads']) * 100
+        else:
+            stats['success_rate'] = 0
+        
+        return stats
     
-    if line:
-        # Add to queue and start download
-        count = manager.add_to_queue(line.split(','))
-        if count > 0:
-            manager.start_queue()
+    def clear_download_history(self):
+        """Clear download history"""
+        self.download_history.clear()
+        self.batch_ops.completed_downloads.clear()
+        self.batch_ops.failed_downloads.clear()
+        
+        if NOTIFICATIONS_AVAILABLE:
+            send_info("Download Manager", "Download history cleared")
+
+class ModelManager:
+    """Enhanced model management"""
+    
+    def __init__(self):
+        self.webui_type = self._get_webui_type()
+        self.model_directories = self._get_model_directories()
+    
+    def _get_webui_type(self) -> str:
+        """Get current WebUI type"""
+        if JSON_UTILS_AVAILABLE:
+            return js.read_key('change_webui', 'automatic1111')
+        return 'automatic1111'
+    
+    def _get_model_directories(self) -> Dict[str, Path]:
+        """Get model directories for current WebUI"""
+        if self.webui_type == 'ComfyUI':
+            base_path = HOME / 'ComfyUI'
+            return {
+                'checkpoints': base_path / 'models' / 'checkpoints',
+                'vae': base_path / 'models' / 'vae', 
+                'lora': base_path / 'models' / 'loras',
+                'embeddings': base_path / 'models' / 'embeddings',
+                'controlnet': base_path / 'models' / 'controlnet'
+            }
+        else:  # automatic1111
+            base_path = HOME / 'stable-diffusion-webui'
+            return {
+                'checkpoints': base_path / 'models' / 'Stable-diffusion',
+                'vae': base_path / 'models' / 'VAE',
+                'lora': base_path / 'models' / 'Lora',
+                'embeddings': base_path / 'embeddings',
+                'controlnet': base_path / 'models' / 'ControlNet'
+            }
+    
+    def scan_models(self) -> Dict[str, List[str]]:
+        """Scan for installed models"""
+        models = {}
+        
+        for model_type, directory in self.model_directories.items():
+            models[model_type] = []
             
-        # Also run original m_download for compatibility
-        return m_download(line, log, unzip)
+            if directory.exists():
+                for file_path in directory.iterdir():
+                    if file_path.is_file() and file_path.suffix.lower() in ['.safetensors', '.ckpt', '.pt']:
+                        models[model_type].append(file_path.name)
+        
+        return models
     
-def enhanced_m_clone(input_source=None, recursive=True, depth=1, log=False):
-    """Enhanced version of m_clone with progress tracking"""
-    # For now, just use original m_clone
-    # Could be enhanced later with progress tracking for git operations
-    return m_clone(input_source, recursive, depth, log)
+    def get_model_info(self, model_path: Path) -> Dict:
+        """Get information about a model file"""
+        try:
+            stat = model_path.stat()
+            return {
+                'name': model_path.name,
+                'size': stat.st_size,
+                'size_mb': round(stat.st_size / (1024 * 1024), 2),
+                'modified': stat.st_mtime,
+                'path': str(model_path)
+            }
+        except Exception as e:
+            return {'error': str(e)}
 
-print("Enhanced Download Manager loaded with real-time progress tracking!")
+# Factory functions for easy access
+def get_enhanced_manager() -> Tuple[EnhancedDownloadManager, BatchDownloadOperations]:
+    """Get enhanced download manager and batch operations"""
+    manager = EnhancedDownloadManager()
+    return manager, manager.batch_ops
+
+def get_model_manager() -> ModelManager:
+    """Get model manager instance"""
+    return ModelManager()
+
+def create_progress_tracker(url: str, filename: str) -> DownloadProgressTracker:
+    """Create a progress tracker for a download"""
+    return DownloadProgressTracker(url, filename)
+
+# Export main classes and functions
+__all__ = [
+    'EnhancedDownloadManager', 'BatchDownloadOperations', 'DownloadProgressTracker',
+    'ModelManager', 'get_enhanced_manager', 'get_model_manager', 'create_progress_tracker'
+]
