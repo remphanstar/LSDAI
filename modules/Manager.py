@@ -16,6 +16,7 @@ import time
 import requests
 import subprocess
 import shlex
+import shutil
 from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 from typing import Optional, Callable, Dict, Any
@@ -56,15 +57,26 @@ def _get_civitai_token() -> Optional[str]:
             return token.strip()
     return None
 
-def format_file_size(size_bytes: int) -> str:
-    """Formats file size in bytes to a human-readable string."""
+def format_file_size(size_bytes: float) -> str:
+    """Formats file size in bytes to a human-readable string. Handles floats."""
+    if size_bytes is None or size_bytes < 0:
+        return "0 B"
     if size_bytes == 0:
         return "0 B"
     size_name = ("B", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB")
-    i = int(abs(size_bytes).bit_length() / 10)
+    # Use integer part for magnitude calculation to find the correct unit
+    size_int = int(size_bytes)
+    if size_int == 0:
+        i = 0
+    else:
+        # bit_length is an integer method
+        i = int(size_int.bit_length() / 10)
+    
     power = 1024 ** i
+    # Use the original float value for calculation to maintain precision
     size = round(size_bytes / power, 2)
     return f"{size} {size_name[i]}"
+
 
 def get_filename_from_url(url: str) -> str:
     """Extract filename from URL with enhanced Civitai support"""
@@ -93,8 +105,8 @@ def get_filename_from_url(url: str) -> str:
         
         # Handle other URLs
         parsed = urlparse(url)
-        filename = parsed.path.split('/')[-1]
-        if filename and '.' in filename:
+        filename = os.path.basename(parsed.path)
+        if filename:
             return filename
         
         timestamp = int(time.time())
@@ -111,7 +123,6 @@ def get_download_directory(url: str, webui_type: str = 'automatic1111') -> Path:
         webui_paths = {
             'automatic1111': HOME / 'stable-diffusion-webui',
             'ComfyUI': HOME / 'ComfyUI',
-            'InvokeAI': HOME / 'InvokeAI'
         }
         base_path = webui_paths.get(webui_type, HOME / 'stable-diffusion-webui')
         
@@ -134,10 +145,16 @@ def verify_download(filepath: Path, min_size_bytes: int = 1024) -> bool:
     """Verify downloaded file integrity."""
     if not filepath.exists():
         return False
-    if filepath.stat().st_size < min_size_bytes:
-        print(f"⚠️ Downloaded file too small: {filepath.stat().st_size} bytes (minimum: {min_size_bytes})")
+    file_size = filepath.stat().st_size
+    if file_size < min_size_bytes:
+        # Check if it's an error page
+        content_snippet = filepath.read_text(encoding='utf-8', errors='ignore')[:200].lower()
+        if 'html' in content_snippet or 'error' in content_snippet or 'unauthorized' in content_snippet:
+             print(f"⚠️ Downloaded file appears to be an HTML error page")
+             return False
+        print(f"⚠️ Downloaded file too small: {file_size} bytes (minimum: {min_size_bytes})")
         return False
-    # A more robust check could involve checksums if available
+    print(f"✅ File verification passed: {format_file_size(file_size)}")
     return True
 
 def download_with_requests(url: str, filepath: Path, progress_callback: ProgressCallback = None) -> bool:
@@ -198,7 +215,7 @@ def download_with_aria2c(url: str, filepath: Path) -> bool:
     """Download file using aria2c."""
     try:
         print(f"📥 Downloading with aria2c: {filepath.name}")
-        cmd = ['aria2c', '-x', '16', '-s', '16', '-k', '1M', '--out', str(filepath), url]
+        cmd = ['aria2c', '-x', '16', '-s', '16', '-k', '1M', '--out', str(filepath.name), '--dir', str(filepath.parent), url]
         if 'civitai.com' in url and (token := _get_civitai_token()):
             cmd.insert(1, f'--header=Authorization: Bearer {token}')
         
@@ -241,13 +258,17 @@ def download_with_curl(url: str, filepath: Path) -> bool:
 
 def m_download(url: str, log: bool = False, unzip: bool = False) -> bool:
     """Master download function trying multiple methods."""
+    print(f"🔄 Processing download: {url}")
     webui_type = js.read(SETTINGS_PATH, 'WEBUI.current', 'automatic1111')
     download_dir = get_download_directory(url, webui_type)
     download_dir.mkdir(parents=True, exist_ok=True)
     filename = get_filename_from_url(url)
     filepath = download_dir / filename
     
-    if filepath.exists() and verify_download(filepath):
+    print(f"📁 Download directory: {download_dir}")
+    print(f"📄 Target filename: {filename}")
+    
+    if filepath.exists() and verify_download(filepath, min_size_bytes=10000): # 10KB minimum for models
         print(f"✅ File already exists and is valid: {filename}")
         return True
 
@@ -261,6 +282,7 @@ def m_download(url: str, log: bool = False, unzip: bool = False) -> bool:
     for name, method in download_methods:
         print(f"🔧 Trying {name}...")
         if method(url, filepath):
+            print(f"✅ Download successful with {name}: {filename}")
             if unzip and filepath.suffix == '.zip':
                 print(f"📦 Unzipping {filepath.name}...")
                 shutil.unpack_archive(str(filepath), str(download_dir))
@@ -268,8 +290,8 @@ def m_download(url: str, log: bool = False, unzip: bool = False) -> bool:
             return True
         else:
             print(f"⚠️ {name} download failed")
-            if filepath.exists(): # Clean up failed partial downloads
-                filepath.unlink()
+            if filepath.exists(): # Clean up failed/partial downloads
+                filepath.unlink(missing_ok=True)
 
     print(f"❌ All download methods failed for: {url}")
     if NOTIFICATIONS_AVAILABLE:
@@ -288,9 +310,9 @@ def m_clone(repo_url: str, dest_path: Optional[Path] = None, depth: int = 1) -> 
 
     try:
         print(f"Cloning {repo_url}...")
-        subprocess.run(['git', 'clone', f'--depth={depth}', repo_url, str(dest_path)], check=True)
+        subprocess.run(['git', 'clone', f'--depth={depth}', repo_url, str(dest_path)], check=True, capture_output=True)
         print("✅ Clone successful.")
         return True
     except subprocess.CalledProcessError as e:
-        print(f"❌ Clone failed: {e}")
+        print(f"❌ Clone failed: {e.stderr.decode()}")
         return False
