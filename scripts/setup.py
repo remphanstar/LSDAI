@@ -74,20 +74,25 @@ SUPPORTED_ENVS = {
     'LIGHTNING_AI': 'Lightning.ai'
 }
 
-# FIXED: File structure - scripts are now directly in scripts folder
+# FIXED: File structure - includes all original and enhanced modules
 FILE_STRUCTURE = {
-    'CSS': ['main-widgets.css', 'download-result.css', 'auto-cleaner.css'],
-    'JS': ['main-widgets.js'],
+    'CSS': ['main-widgets.css', 'download-result.css', 'auto-cleaner.css', 'enhanced-widgets.css'],
+    'JS': ['main-widgets.js', 'enhanced-widgets.js'],
     'modules': [
         'json_utils.py', 'webui_utils.py', 'widget_factory.py',
         'CivitaiAPI.py', 'Manager.py', 'TunnelHub.py', '_season.py',
-        'enhanced_model_selector.py'
+        'enhanced_model_selector.py', 'AdvancedLogging.py', 'CloudSync.py',
+        'EnhancedModelManager.py', 'ExtensionManager.py', 'ModelBenchmarking.py',
+        'NotificationSystem.py', 'EnhancedManager.py'
     ],
     'scripts': [
         'widgets-en.py', 'downloading-en.py', 'webui-installer.py',
         'launch.py', 'download-result.py', 'auto-cleaner.py',
         '_models-data.py', '_xl-models-data.py', 'setup.py',
-        'requirements.txt'
+        'requirements.txt', 'enhanced-setup.py', 'enhanced-widgets-en.py',
+        'enhanced-downloading-integration.py', 'enhanced-launch-integration.py',
+        'enhanced-launch.py', 'master-integration.py', 'migrate-settings.py',
+        'enhanced_model_selector.py'
     ],
     '__configs__': {
         'A1111': ['config.json', 'ui-config.json', '_extensions.txt'],
@@ -302,11 +307,11 @@ async def download_files_async(lang, fork_user, fork_repo, branch, log_errors):
         clear_output()
         print(f"Downloaded {successful}/{len(file_list)} files successfully")
         if errors:
-            print(f"\n{len(errors)} files failed to download")
+            print(f"\\n{len(errors)} files failed to download")
             if log_errors:
-                print("\nErrors occurred during download:")
+                print("\\nErrors occurred during download:")
                 for url, path, error in errors[:10]:
-                    print(f"URL: {url}\nPath: {path}\nError: {error}\n")
+                    print(f"URL: {url}\\nPath: {path}\\nError: {error}\\n")
                 if len(errors) > 10:
                     print(f"... and {len(errors) - 10} more errors")
             critical_files = ['json_utils.py', '_season.py']
