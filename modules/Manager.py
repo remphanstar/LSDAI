@@ -1,503 +1,540 @@
-# ~ Manager Module (V2) - FIXED VERSION | by ANXETY ~
+# Manager.py - LSDAI Download Manager
+# Handles file downloads with multiple fallback methods
 
-from CivitaiAPI import CivitAiAPI    # CivitAI API
-import json_utils as js              # JSON
-
-from urllib.parse import urlparse
-from pathlib import Path
-import subprocess
-import tempfile
-import zipfile
-import shlex
-import sys
-import re
 import os
+import re
+import subprocess
+import requests
+import shutil
+from pathlib import Path
+from urllib.parse import urlparse, parse_qs
+import time
+import json
 
+# Get environment paths
+HOME = Path(os.environ.get('home_path', '/content'))
+SCR_PATH = Path(os.environ.get('scr_path', HOME / 'LSDAI'))
 
-osENV = os.environ
-CD = os.chdir
+# Try to import enhanced modules
+try:
+    from modules.NotificationSystem import send_info, send_success, send_error
+    NOTIFICATIONS_AVAILABLE = True
+except ImportError:
+    NOTIFICATIONS_AVAILABLE = False
 
-# Constants (auto-convert env vars to Path)
-PATHS = {k: Path(v) for k, v in osENV.items() if k.endswith('_path')}   # k -> key; v -> value
-
-HOME = PATHS['home_path']
-SCR_PATH = PATHS['scr_path']
-SETTINGS_PATH = PATHS['settings_path']
-
-CAI_TOKEN = js.read(SETTINGS_PATH, 'WIDGETS.civitai_token') or os.getenv('CIVITAI_API_TOKEN') or ''
-HF_TOKEN = js.read(SETTINGS_PATH, 'WIDGETS.huggingface_token') or ''
-
-
-# ========================= Logging ========================
-
-def log_message(message, log=False, status='info'):
-    """Display colored log messages."""
-    if not log:
-        return
-    colors = {
-        'error': '\033[31m[ERROR]:\033[0m',
-        'warning': '\033[33m[WARNING]:\033[0m',
-        'success': '\033[32m[SUCCESS]:\033[0m',
-        'info': '\033[34m[INFO]:\033[0m'
-    }
-    prefix = colors.get(status.lower(), '')
-    print(f">> {prefix} {message}" if prefix else message)
-
-# Error handling decorator
-def handle_errors(func):
-    """Catch and log exceptions."""
-    def wrapper(*args, **kwargs):
-        try:
-            return func(*args, **kwargs)
-        except Exception as e:
-            log_message(str(e), True, 'error')
-            return None
-    return wrapper
-
-
-# ===================== Core Utilities =====================
-
-def _get_file_name(url, is_git=False):
-    """Get the file name based on the URL."""
-    if any(domain in url for domain in ['civitai.com', 'drive.google.com']):
-        return None
-
-    filename = Path(urlparse(url).path).name or None
-
-    if not is_git and filename and not Path(filename).suffix:
-        suffix = Path(urlparse(url).path).suffix
-        if suffix:
-            filename += suffix
+def send_notification(title, message, type_="info"):
+    """Send notification if available"""
+    if NOTIFICATIONS_AVAILABLE:
+        if type_ == "success":
+            send_success(title, message)
+        elif type_ == "error":
+            send_error(title, message)
         else:
-            filename = None
+            send_info(title, message)
 
-    return filename
-
-def handle_path_and_filename(parts, url, is_git=False):
-    """Extract path and filename from parts."""
-    path, filename = None, None
-
-    if len(parts) >= 3:
-        path = Path(parts[1]).expanduser()
-        filename = parts[2]
-    elif len(parts) == 2:
-        arg = parts[1]
-        if '/' in arg or arg.startswith('~'):
-            path = Path(arg).expanduser()
+def get_download_directory(url, webui_type='automatic1111'):
+    """Determine the correct download directory based on file type and WebUI"""
+    
+    # Extract filename from URL
+    parsed_url = urlparse(url)
+    filename = os.path.basename(parsed_url.path).lower()
+    
+    # Base directories for different WebUI types
+    if webui_type == 'ComfyUI':
+        base_dirs = {
+            'models': HOME / 'ComfyUI' / 'models',
+            'checkpoints': HOME / 'ComfyUI' / 'models' / 'checkpoints',
+            'vae': HOME / 'ComfyUI' / 'models' / 'vae',
+            'lora': HOME / 'ComfyUI' / 'models' / 'loras',
+            'embeddings': HOME / 'ComfyUI' / 'models' / 'embeddings',
+            'controlnet': HOME / 'ComfyUI' / 'models' / 'controlnet'
+        }
+    else:  # automatic1111
+        base_dirs = {
+            'models': HOME / 'stable-diffusion-webui' / 'models' / 'Stable-diffusion',
+            'checkpoints': HOME / 'stable-diffusion-webui' / 'models' / 'Stable-diffusion',
+            'vae': HOME / 'stable-diffusion-webui' / 'models' / 'VAE',
+            'lora': HOME / 'stable-diffusion-webui' / 'models' / 'Lora',
+            'embeddings': HOME / 'stable-diffusion-webui' / 'embeddings',
+            'controlnet': HOME / 'stable-diffusion-webui' / 'models' / 'ControlNet'
+        }
+    
+    # Determine file type based on filename and URL patterns
+    if any(pattern in filename for pattern in ['.safetensors', '.ckpt', '.pt']):
+        if 'vae' in filename or 'vae' in url.lower():
+            return base_dirs['vae']
+        elif any(pattern in filename for pattern in ['lora', 'lyco']):
+            return base_dirs['lora']
+        elif 'controlnet' in url.lower() or 'control' in filename:
+            return base_dirs['controlnet']
+        elif any(pattern in filename for pattern in ['embedding', 'textual']):
+            return base_dirs['embeddings']
         else:
-            filename = arg
-
-    if not filename:
-        url_path = urlparse(url).path
-        if url_path:
-            url_filename = Path(url_path).name
-            if url_filename:
-                filename = url_filename
-
-    if not is_git and 'drive.google.com' not in url:
-        if filename and not Path(filename).suffix:
-            url_ext = Path(urlparse(url).path).suffix
-            if url_ext:
-                filename += url_ext
-            else:
-                filename = None
-
-    return path, filename
-
-@handle_errors
-def strip_url(url):
-    """Normalize special URLs (civitai, huggingface, github)."""
-    # **FIX: Do NOT modify civitai URLs here. Pass them directly to the downloader.**
-    if 'civitai.com/models/' in url:
-        return url
-
-    if 'huggingface.co' in url:
-        url = url.replace('/blob/', '/resolve/').split('?')[0]
-
-    if 'github.com' in url:
-        url = url.replace('/blob/', '/raw/')
-
-    return url
-
-def is_github_url(url):
-    """Check if the URL is a valid GitHub URL"""
-    return urlparse(url).netloc in ('github.com', 'www.github.com')
-
-def sanitize_filename(filename):
-    """Sanitize filename to prevent path traversal and command injection."""
-    if not filename:
-        return None
-    
-    filename = os.path.basename(filename)
-    filename = re.sub(r'[^\w\-_\.]', '_', filename)
-    
-    if len(filename) > 255:
-        name, ext = os.path.splitext(filename)
-        filename = name[:250] + ext
-    
-    return filename
-
-def sanitize_path(path_str):
-    """Sanitize path to prevent directory traversal."""
-    if not path_str:
-        return None
-    
-    path = Path(path_str).resolve()
-    try:
-        path.relative_to(HOME)
-        return path
-    except ValueError:
-        log_message(f"Path {path_str} is outside allowed directory", True, 'warning')
-        return None
-
-
-# ======================== Download ========================
-
-@handle_errors
-def m_download(line=None, log=False, unzip=False):
-    """Download files from a comma-separated list of URLs or file paths."""
-    if not line:
-        return log_message("Missing URL argument, nothing to download", log, 'error')
-
-    links = [link.strip() for link in line.split(',') if link.strip()]
-
-    if not links:
-        log_message('Missing URL, downloading nothing', log, 'info')
-        return
-
-    for link in links:
-        if link.endswith('.txt') and Path(link).expanduser().is_file():
-            with open(Path(link).expanduser(), 'r') as file:
-                for subline in file:
-                    _process_download(subline.strip(), log, unzip)
-        else:
-            _process_download(link, log, unzip)
-
-@handle_errors
-def _process_download(line, log, unzip):
-    """Process an individual download line."""
-    parts = line.split()
-    url = parts[0].replace('\\', '')
-    url = strip_url(url)
-
-    if not url:
-        return
-
-    try:
-        parsed = urlparse(url)
-        if not all([parsed.scheme, parsed.netloc]):
-            log_message(f'Invalid URL format: {url}', log, 'warning')
-            return
-    except Exception as e:
-        log_message(f'URL validation failed for {url}: {str(e)}', log, 'warning')
-        return
-
-    path, filename = handle_path_and_filename(parts, url)
-    
-    if filename:
-        filename = sanitize_filename(filename)
-    if path:
-        path = sanitize_path(str(path))
-        
-    if not path:
-        log_message("Invalid or unsafe download path", log, 'error')
-        return
-        
-    current_dir = Path.cwd()
-
-    try:
-        if path:
-            path.mkdir(parents=True, exist_ok=True)
-            CD(path)
-
-        _download_file(url, filename, log)
-
-        if unzip and filename and filename.lower().endswith('.zip'):
-            _unzip_file(filename, log)
-    except Exception as e:
-        log_message(f"Download error: {str(e)}", log, 'error')
-    finally:
-        CD(current_dir)
-
-def _download_file(url, filename, log):
-    """Dispatch download method by domain with improved security."""
-    if any(domain in url for domain in ['civitai.com', 'huggingface.co', 'github.com']):
-        _aria2_download(url, filename, log)
-    elif 'drive.google.com' in url:
-        _gdrive_download(url, filename, log)
+            return base_dirs['checkpoints']
+    elif filename.endswith('.png') or filename.endswith('.jpg'):
+        return base_dirs['embeddings']
     else:
-        _curl_download(url, filename, log)
+        # Default to models directory
+        return base_dirs['models']
 
-def _curl_download(url, filename, log):
-    """Download using curl with proper argument handling."""
-    cmd = ['curl', '-#JL', url]
-    if filename:
-        cmd.extend(['-o', filename])
-    _run_command_safe(cmd, log)
+def clean_filename(filename):
+    """Clean filename by removing problematic characters"""
+    # Remove or replace problematic characters
+    filename = re.sub(r'[<>:"/\\|?*]', '_', filename)
+    # Remove excessive whitespace
+    filename = re.sub(r'\s+', ' ', filename).strip()
+    # Limit length
+    if len(filename) > 200:
+        name, ext = os.path.splitext(filename)
+        filename = name[:200-len(ext)] + ext
+    return filename
 
-def _aria2_download(url, filename, log):
-    """Download using aria2c with proper argument handling."""
-    user_agent = 'Mozilla/5.0'
-    
-    cmd = [
-        'aria2c',
-        f'--header=User-Agent: {user_agent}',
-        '--allow-overwrite=true',
-        '--console-log-level=error',
-        '--stderr=true',
-        '-c', '-x16', '-s16', '-k1M', '-j5'
-    ]
-    
-    # **FIX: Let CivitaiAPI handle the token in the URL itself.**
-    if 'huggingface.co' in url and HF_TOKEN:
-        cmd.append(f'--header=Authorization: Bearer {HF_TOKEN}')
-
-    if not filename:
-        filename = _get_file_name(url)
-        if filename:
-            filename = sanitize_filename(filename)
-
-    cmd.append(url)
-    if filename:
-        cmd.extend(['-o', filename])
-
-    _aria2_monitor(cmd, log)
-
-def _gdrive_download(url, filename, log):
-    """Download from Google Drive with proper argument handling."""
-    cmd = ['gdown', '--fuzzy', url]
-    if filename:
-        cmd.extend(['-O', filename])
-    if 'drive/folders' in url:
-        cmd.append('--folder')
-    _run_command_safe(cmd, log)
-
-def _unzip_file(file, log):
-    """Extract the ZIP file to a directory named after archive."""
-    path = Path(file)
-    if not path.exists():
-        log_message(f"ZIP file not found: {file}", log, 'error')
-        return
-        
-    extract_dir = path.parent / path.stem
+def get_filename_from_url(url):
+    """Extract and clean filename from URL"""
     
     try:
-        with zipfile.ZipFile(path, 'r') as zip_ref:
-            total_size = 0
-            for member in zip_ref.filelist:
-                total_size += member.file_size
-                if os.path.isabs(member.filename) or ".." in member.filename:
-                    log_message(f"Unsafe zip entry: {member.filename}", log, 'warning')
-                    continue
+        # Parse URL
+        parsed_url = urlparse(url)
+        
+        # Check if it's a CivitAI URL with special handling
+        if 'civitai.com' in url:
+            return get_civitai_filename(url)
+        elif 'huggingface.co' in url:
+            return get_huggingface_filename(url)
+        
+        # Extract filename from path
+        filename = os.path.basename(parsed_url.path)
+        
+        # If no filename in path, try to extract from query parameters
+        if not filename or '.' not in filename:
+            query_params = parse_qs(parsed_url.query)
+            if 'filename' in query_params:
+                filename = query_params['filename'][0]
+        
+        # If still no filename, generate one
+        if not filename:
+            filename = f"downloaded_file_{int(time.time())}"
+        
+        return clean_filename(filename)
+        
+    except Exception as e:
+        print(f"Error extracting filename from URL: {e}")
+        return f"downloaded_file_{int(time.time())}"
+
+def get_civitai_filename(url):
+    """Get filename for CivitAI downloads"""
+    try:
+        # CivitAI URLs often need special handling
+        response = requests.head(url, allow_redirects=True, timeout=10)
+        
+        # Try to get filename from Content-Disposition header
+        if 'Content-Disposition' in response.headers:
+            content_disp = response.headers['Content-Disposition']
+            filename_match = re.search(r'filename[^;=\n]*=(([\'"]).*?\2|[^;\n]*)', content_disp)
+            if filename_match:
+                filename = filename_match.group(1).strip('"\'')
+                return clean_filename(filename)
+        
+        # Fallback to URL parsing
+        return clean_filename(os.path.basename(urlparse(url).path))
+        
+    except Exception as e:
+        print(f"Error getting CivitAI filename: {e}")
+        return f"civitai_model_{int(time.time())}.safetensors"
+
+def get_huggingface_filename(url):
+    """Get filename for HuggingFace downloads"""
+    try:
+        # HuggingFace URLs have predictable structure
+        if '/resolve/' in url:
+            parts = url.split('/resolve/')[-1].split('/')
+            if len(parts) >= 2:
+                return clean_filename(parts[-1])
+        
+        return clean_filename(os.path.basename(urlparse(url).path))
+        
+    except Exception as e:
+        print(f"Error getting HuggingFace filename: {e}")
+        return f"huggingface_model_{int(time.time())}"
+
+def download_with_requests(url, filepath, progress_callback=None):
+    """Download file using requests with progress tracking"""
+    
+    try:
+        print(f"📥 Downloading with requests: {filepath.name}")
+        
+        response = requests.get(url, stream=True, timeout=30)
+        response.raise_for_status()
+        
+        total_size = int(response.headers.get('content-length', 0))
+        downloaded_size = 0
+        
+        with open(filepath, 'wb') as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                if chunk:
+                    f.write(chunk)
+                    downloaded_size += len(chunk)
                     
-            if total_size > 1024 * 1024 * 1024:
-                log_message(f"ZIP file too large: {total_size} bytes", log, 'warning')
-                return
+                    if progress_callback and total_size > 0:
+                        progress = (downloaded_size / total_size) * 100
+                        progress_callback(progress)
+        
+        return True
+        
+    except Exception as e:
+        print(f"⚠️ Requests download failed: {e}")
+        return False
+
+def download_with_wget(url, filepath):
+    """Download file using wget"""
+    
+    try:
+        print(f"📥 Downloading with wget: {filepath.name}")
+        
+        cmd = ['wget', '-O', str(filepath), url, '--no-check-certificate', '--progress=bar:force']
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
+        
+        return result.returncode == 0
+        
+    except Exception as e:
+        print(f"⚠️ Wget download failed: {e}")
+        return False
+
+def download_with_curl(url, filepath):
+    """Download file using curl"""
+    
+    try:
+        print(f"📥 Downloading with curl: {filepath.name}")
+        
+        cmd = ['curl', '-L', '-o', str(filepath), url, '--progress-bar']
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
+        
+        return result.returncode == 0
+        
+    except Exception as e:
+        print(f"⚠️ Curl download failed: {e}")
+        return False
+
+def download_with_aria2c(url, filepath):
+    """Download file using aria2c"""
+    
+    try:
+        print(f"📥 Downloading with aria2c: {filepath.name}")
+        
+        cmd = [
+            'aria2c',
+            '--dir', str(filepath.parent),
+            '--out', filepath.name,
+            '--max-connection-per-server', '4',
+            '--split', '4',
+            '--continue', 'true',
+            url
+        ]
+        
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=3600)
+        
+        return result.returncode == 0
+        
+    except Exception as e:
+        print(f"⚠️ Aria2c download failed: {e}")
+        return False
+
+def verify_download(filepath, min_size=1024):
+    """Verify that the downloaded file is valid"""
+    
+    try:
+        if not filepath.exists():
+            return False
+        
+        # Check file size
+        file_size = filepath.stat().st_size
+        if file_size < min_size:
+            print(f"⚠️ Downloaded file too small: {file_size} bytes")
+            return False
+        
+        # Check if file is HTML (error page)
+        if filepath.suffix.lower() in ['.safetensors', '.ckpt', '.pt']:
+            with open(filepath, 'rb') as f:
+                header = f.read(512)
+                if b'<html' in header.lower() or b'<body' in header.lower():
+                    print(f"⚠️ Downloaded file appears to be HTML (error page)")
+                    return False
+        
+        return True
+        
+    except Exception as e:
+        print(f"⚠️ Error verifying download: {e}")
+        return False
+
+def m_download(url, log=False, unzip=False, webui_type='automatic1111', progress_callback=None):
+    """
+    Main download function with multiple fallback methods
+    
+    Args:
+        url: URL to download
+        log: Whether to log the download
+        unzip: Whether to unzip after download (not implemented)
+        webui_type: Type of WebUI for directory selection
+        progress_callback: Function to call with progress updates
+    
+    Returns:
+        bool: True if download successful, False otherwise
+    """
+    
+    if not url or not url.strip():
+        print("⚠️ Empty URL provided")
+        return False
+    
+    url = url.strip()
+    print(f"🔄 Processing download: {url}")
+    
+    try:
+        # Get filename and directory
+        filename = get_filename_from_url(url)
+        download_dir = get_download_directory(url, webui_type)
+        
+        # Ensure download directory exists
+        download_dir.mkdir(parents=True, exist_ok=True)
+        
+        filepath = download_dir / filename
+        
+        # Check if file already exists
+        if filepath.exists() and verify_download(filepath):
+            print(f"✅ File already exists: {filepath}")
+            if NOTIFICATIONS_AVAILABLE:
+                send_notification("Download", f"File already exists: {filename}", "info")
+            return True
+        
+        print(f"📁 Download directory: {download_dir}")
+        print(f"📄 Filename: {filename}")
+        
+        # Try different download methods in order of preference
+        download_methods = [
+            ('aria2c', lambda: download_with_aria2c(url, filepath)),
+            ('requests', lambda: download_with_requests(url, filepath, progress_callback)),
+            ('wget', lambda: download_with_wget(url, filepath)),
+            ('curl', lambda: download_with_curl(url, filepath))
+        ]
+        
+        for method_name, method_func in download_methods:
+            try:
+                print(f"🔧 Trying {method_name}...")
                 
-            zip_ref.extractall(extract_dir)
-        path.unlink()
-        log_message(f"Unpacked {file} to {extract_dir}", log)
-    except zipfile.BadZipFile:
-        log_message(f"Invalid ZIP file: {file}", log, 'error')
-    except Exception as e:
-        log_message(f"Extraction failed: {str(e)}", log, 'error')
-
-def _aria2_monitor(command, log):
-    """Monitor aria2c download progress with proper subprocess handling."""
-    try:
-        process = subprocess.Popen(
-            command,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True
-        )
-        result, error_codes, error_messages = '', [], []
-        br = False
-
-        while True:
-            line = process.stderr.readline()
-            if line == '' and process.poll() is not None:
-                break
-
-            result += line
-            for raw_line in line.splitlines():
-                _handle_aria_errors(raw_line, error_codes, error_messages)
-                if re.match(r'\[#\w{6}\s.*\]', raw_line):
-                    formatted = _format_aria_line(raw_line)
-                    if log:
-                        print(f"\r{' ' * 180}\r{formatted}", end='', flush=True)
-                        br = True
-
-        if log:
-            if error_codes or error_messages:
-                print()
-            for err in error_codes + error_messages:
-                print(err)
-
-            if br:
-                print()
-
-            if '======+====+===========' in result:
-                for line in result.splitlines():
-                    if '|' in line and 'OK' in line:
-                        print(re.sub(r'(OK)', '\033[32m\\1\033[0m', line))
-
-        process.wait()
-    except KeyboardInterrupt:
-        print()
-        log_message("Download interrupted", log)
-        if 'process' in locals():
-            process.terminate()
-    except Exception as e:
-        log_message(f"Download process error: {str(e)}", log, 'error')
-
-def _format_aria_line(line):
-    """Format a line of output with ANSI color codes."""
-    line = re.sub(r'\[', '\033[35m【\033[0m', line)
-    line = re.sub(r'\]', '\033[35m】\033[0m', line)
-    line = re.sub(r'(#)(\w+)', r'\1\033[32m\2\033[0m', line)
-    line = re.sub(r'(\(\d+%\))', r'\033[36m\1\033[0m', line)
-    line = re.sub(r'(CN:)(\d+)', r'\1\033[34m\2\033[0m', line)
-    line = re.sub(r'(DL:)([^\s]+)', r'\1\033[32m\2\033[0m', line)
-    line = re.sub(r'(ETA:)([^\s]+)', r'\1\033[33m\2\033[0m', line)
-    return line
-
-def _handle_aria_errors(line, error_codes, error_messages):
-    """Check and collect error messages from the output."""
-    if 'errorCode' in line or 'Exception' in line:
-        error_codes.append(line)
-    if '|' in line and 'ERR' in line:
-        error_messages.append(re.sub(r'(ERR)', '\033[31m\\1\033[0m', line))
-
-def _run_command_safe(command, log):
-    """FIXED: Execute a command safely using subprocess with argument list."""
-    try:
-        process = subprocess.Popen(
-            command,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True
-        )
+                if method_func():
+                    # Verify download
+                    if verify_download(filepath):
+                        print(f"✅ Download successful with {method_name}: {filename}")
+                        
+                        if log:
+                            log_download(url, str(filepath), True)
+                        
+                        if NOTIFICATIONS_AVAILABLE:
+                            send_notification("Download Complete", f"Successfully downloaded: {filename}", "success")
+                        
+                        return True
+                    else:
+                        print(f"⚠️ Download verification failed for {method_name}")
+                        # Clean up invalid file
+                        if filepath.exists():
+                            filepath.unlink()
+                else:
+                    print(f"⚠️ {method_name} download failed")
+                    
+            except Exception as e:
+                print(f"⚠️ {method_name} error: {e}")
+                continue
+        
+        # All methods failed
+        print(f"❌ All download methods failed for: {url}")
         
         if log:
-            while True:
-                line = process.stderr.readline()
-                if line == '' and process.poll() is not None:
-                    break
-                if line:
-                    print(line.rstrip())
+            log_download(url, str(filepath), False)
         
-        process.wait()
+        if NOTIFICATIONS_AVAILABLE:
+            send_notification("Download Failed", f"Could not download: {filename}", "error")
         
-        if process.returncode != 0:
-            log_message(f"Command failed with code {process.returncode}", log, 'error')
+        return False
+        
+    except Exception as e:
+        print(f"❌ Download error: {e}")
+        return False
+
+def m_clone(input_source, recursive=True, depth=1, log=False):
+    """
+    Clone a git repository
+    
+    Args:
+        input_source: Git repository URL
+        recursive: Whether to clone recursively
+        depth: Clone depth (1 for shallow clone)
+        log: Whether to log the operation
+    
+    Returns:
+        bool: True if clone successful, False otherwise
+    """
+    
+    if not input_source or not input_source.strip():
+        print("⚠️ Empty repository URL provided")
+        return False
+    
+    url = input_source.strip()
+    
+    try:
+        # Extract repository name
+        repo_name = os.path.basename(url).replace('.git', '')
+        
+        # Determine clone directory (extensions for WebUI)
+        clone_dir = HOME / 'stable-diffusion-webui' / 'extensions' / repo_name
+        
+        # Check if already exists
+        if clone_dir.exists():
+            print(f"✅ Repository already exists: {clone_dir}")
+            return True
+        
+        # Ensure parent directory exists
+        clone_dir.parent.mkdir(parents=True, exist_ok=True)
+        
+        print(f"📥 Cloning repository: {url}")
+        print(f"📁 Destination: {clone_dir}")
+        
+        # Build git clone command
+        cmd = ['git', 'clone']
+        
+        if depth and depth > 0:
+            cmd.extend(['--depth', str(depth)])
+        
+        if recursive:
+            cmd.append('--recursive')
+        
+        cmd.extend([url, str(clone_dir)])
+        
+        # Execute git clone
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        
+        if result.returncode == 0:
+            print(f"✅ Repository cloned successfully: {repo_name}")
+            
+            if log:
+                log_clone(url, str(clone_dir), True)
+            
+            if NOTIFICATIONS_AVAILABLE:
+                send_notification("Clone Complete", f"Repository cloned: {repo_name}", "success")
+            
+            return True
+        else:
+            print(f"❌ Git clone failed: {result.stderr}")
+            
+            if log:
+                log_clone(url, str(clone_dir), False)
+            
+            return False
             
     except Exception as e:
-        log_message(f"Command execution error: {str(e)}", log, 'error')
+        print(f"❌ Clone error: {e}")
+        return False
 
-
-# ======================== Git Clone =======================
-
-@handle_errors
-def m_clone(input_source=None, recursive=True, depth=1, log=False):
-    """Main function to clone repositories"""
-    if not input_source:
-        return log_message("Missing repository source", log, 'error')
-
-    sources = [link.strip() for link in input_source.split(',') if link.strip()]
-
-    if not sources:
-        log_message('No valid repositories to clone', log, 'info')
-        return
-
-    for source in sources:
-        if source.endswith('.txt') and Path(source).expanduser().is_file():
-            with open(Path(source).expanduser()) as file:
-                for line in file:
-                    _process_clone(line.strip(), recursive, depth, log)
-        else:
-            _process_clone(source, recursive, depth, log)
-
-@handle_errors
-def _process_clone(line, recursive, depth, log):
-    """Process clone with improved security."""
-    parts = shlex.split(line)
-    if not parts:
-        return log_message("Empty clone entry", log, 'error')
-
-    url = parts[0].replace('\\', '')
-    if not is_github_url(url):
-        return log_message(f"Not a GitHub URL: {url}", log, 'warning')
-
-    path, name = handle_path_and_filename(parts, url, is_git=True)
+def log_download(url, filepath, success):
+    """Log download operation"""
     
-    if name:
-        name = sanitize_filename(name)
-    if path:
-        path = sanitize_path(str(path))
-        
-    if not path:
-        log_message("Invalid or unsafe clone path", log, 'error')
-        return
-        
-    current_dir = Path.cwd()
-
     try:
-        if path:
-            path.mkdir(parents=True, exist_ok=True)
-            CD(path)
-
-        cmd = _build_git_cmd(url, name, recursive, depth)
-        _run_git_safe(cmd, log)
+        log_dir = SCR_PATH / 'logs'
+        log_dir.mkdir(exist_ok=True)
+        
+        log_file = log_dir / 'downloads.json'
+        
+        log_entry = {
+            'timestamp': time.strftime('%Y-%m-%d %H:%M:%S'),
+            'url': url,
+            'filepath': filepath,
+            'success': success,
+            'type': 'download'
+        }
+        
+        # Read existing log
+        if log_file.exists():
+            with open(log_file, 'r') as f:
+                logs = json.load(f)
+        else:
+            logs = []
+        
+        # Add new entry
+        logs.append(log_entry)
+        
+        # Keep only last 1000 entries
+        if len(logs) > 1000:
+            logs = logs[-1000:]
+        
+        # Write back
+        with open(log_file, 'w') as f:
+            json.dump(logs, f, indent=2)
+            
     except Exception as e:
-        log_message(f"Clone error: {str(e)}", log, 'error')
-    finally:
-        CD(current_dir)
+        print(f"Warning: Could not log download: {e}")
 
-def _build_git_cmd(url, name, recursive, depth):
-    """Build git command as argument list."""
-    cmd = ['git', 'clone']
-    if depth > 0:
-        cmd.extend(['--depth', str(depth)])
-    if recursive:
-        cmd.append('--recursive')
-    cmd.append(url)
-    if name:
-        cmd.append(name)
-    return cmd
-
-def _run_git_safe(command, log):
-    """FIXED: Run git command safely."""
+def log_clone(url, clone_dir, success):
+    """Log clone operation"""
+    
     try:
-        process = subprocess.Popen(
-            command,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True
-        )
-
-        while True:
-            output = process.stdout.readline()
-            if not output and process.poll() is not None:
-                break
-            output = output.strip()
-            if not output:
-                continue
-
-            # Parse cloning progress
-            if 'Cloning into' in output:
-                repo = re.search(r"'(.+?)'", output) 
-                if repo:
-                    log_message(f"Cloning: \033[32m{repo.group(1)}\033[0m", log)
-
-            # Handle error messages
-            if 'fatal' in output.lower():
-                log_message(output, log, 'error')
-
-        process.wait()
+        log_dir = SCR_PATH / 'logs'
+        log_dir.mkdir(exist_ok=True)
         
-        if process.returncode != 0:
-            log_message(f"Git command failed with code {process.returncode}", log, 'error')
+        log_file = log_dir / 'downloads.json'
+        
+        log_entry = {
+            'timestamp': time.strftime('%Y-%m-%d %H:%M:%S'),
+            'url': url,
+            'filepath': clone_dir,
+            'success': success,
+            'type': 'clone'
+        }
+        
+        # Read existing log
+        if log_file.exists():
+            with open(log_file, 'r') as f:
+                logs = json.load(f)
+        else:
+            logs = []
+        
+        # Add new entry
+        logs.append(log_entry)
+        
+        # Keep only last 1000 entries
+        if len(logs) > 1000:
+            logs = logs[-1000:]
+        
+        # Write back
+        with open(log_file, 'w') as f:
+            json.dump(logs, f, indent=2)
+            
+    except Exception as e:
+        print(f"Warning: Could not log clone: {e}")
+
+def get_download_stats():
+    """Get download statistics"""
+    
+    try:
+        log_file = SCR_PATH / 'logs' / 'downloads.json'
+        
+        if not log_file.exists():
+            return {'total': 0, 'successful': 0, 'failed': 0}
+        
+        with open(log_file, 'r') as f:
+            logs = json.load(f)
+        
+        total = len(logs)
+        successful = sum(1 for log in logs if log.get('success', False))
+        failed = total - successful
+        
+        return {
+            'total': total,
+            'successful': successful,
+            'failed': failed,
+            'success_rate': (successful / total * 100) if total > 0 else 0
+        }
         
     except Exception as e:
-        log_message(f"Git execution error: {str(e)}", log, 'error')
+        print(f"Error getting download stats: {e}")
+        return {'total': 0, 'successful': 0, 'failed': 0}
+
+# Export main functions
+__all__ = ['m_download', 'm_clone', 'get_download_stats']
