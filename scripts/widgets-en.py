@@ -3,10 +3,12 @@
 from widget_factory import WidgetFactory        # WIDGETS
 from webui_utils import update_current_webui    # WEBUI
 import json_utils as js                         # JSON
+from enhanced_model_selector import create_enhanced_model_section, ENHANCED_MODEL_CSS
 
-from IPython.display import display, Javascript
+from IPython.display import display, Javascript, HTML
 import ipywidgets as widgets
 from pathlib import Path
+import importlib.util
 import json
 import os
 
@@ -69,7 +71,7 @@ class WidgetManager:
         ''')
 
     def read_model_data(self, file_path, data_type):
-        """Reads model, VAE, or ControlNet data from the specified file."""
+        """FIXED: Reads model, VAE, or ControlNet data safely using importlib."""
         type_map = {
             'model': ('model_list', ['none']),
             'vae': ('vae_list', ['none', 'ALL']),
@@ -77,16 +79,24 @@ class WidgetManager:
             'lora': ('lora_list', ['none', 'ALL'])
         }
         key, prefixes = type_map[data_type]
-        local_vars = {}
-
+        
         try:
-            with open(file_path) as f:
-                exec(f.read(), {}, local_vars)
-            names = list(local_vars[key].keys())
+            # Create a module spec from the file path
+            spec = importlib.util.spec_from_file_location("model_data", file_path)
+            model_data_module = importlib.util.module_from_spec(spec)
+            # Execute the module to load its contents
+            spec.loader.exec_module(model_data_module)
+            
+            # Get the data dictionary (e.g., model_list)
+            data_dict = getattr(model_data_module, key, {})
+            if not isinstance(data_dict, dict):
+                raise TypeError(f"Data for '{key}' is not a dictionary.")
+                
+            names = list(data_dict.keys())
             return prefixes + names
         except Exception as e:
             print(f"Warning: Could not load {data_type} data: {e}")
-            return prefixes  # Return at least the prefixes
+            return prefixes
 
     def get_safe_default(self, options, preferred_defaults):
         """Get the first available option from preferred defaults, or first option if none match"""
@@ -139,32 +149,11 @@ WEBUI_SELECTION = {
     'SD-UX':   "--xformers --no-half-vae"
 }
 
-# --- MODEL ---
-"""Create model selection widgets."""
-model_header = factory.create_header('Model Selection')
-model_options = wm.read_model_data(f"{SCRIPTS}/_models-data.py", 'model')
-
-# FIXED: Use safe default selection for models
-model_preferred_defaults = [
-    'D5K6.0',  # First model in your custom list
-    'Merged amateurs - Mixed Amateurs',  # Second option
-]
-model_default = wm.get_safe_default(model_options, model_preferred_defaults)
-model_widget = factory.create_select_multiple(model_options, 'Model:', (model_default,))
-
-model_num_widget = factory.create_text('Model Number:', '', 'Enter model numbers for download.')
-inpainting_model_widget = factory.create_checkbox('Inpainting Models', False, class_names=['inpaint'], layout={'width': '250px'})
-XL_models_widget = factory.create_checkbox('SDXL', False, class_names=['sdxl'])
-
-switch_model_widget = factory.create_hbox([inpainting_model_widget, XL_models_widget])
-
-# Store widgets in manager
-wm.widgets.update({
-    'model': model_widget,
-    'model_num': model_num_widget,
-    'inpainting_model': inpainting_model_widget,
-    'XL_models': XL_models_widget
-})
+# --- MODEL (ENHANCED) ---
+# This section is now handled by the enhanced_model_selector
+# We initialize a dummy XL_models widget here for the callback to work
+XL_models_widget = factory.create_checkbox('SDXL Models', False, class_names=['sdxl'])
+wm.widgets['XL_models'] = XL_models_widget
 
 # --- VAE ---
 """Create VAE selection widgets."""
@@ -494,11 +483,14 @@ import_button.on_click(import_settings)
 # =================== DISPLAY / SETTINGS ===================
 
 factory.load_css(widgets_css)   # load CSS (widgets)
+# FIXED: Load Enhanced Model CSS
+display(HTML(ENHANCED_MODEL_CSS))
 if IN_COLAB:
     factory.load_js(widgets_js)     # load JS (widgets) - only in Colab
 
 # Display sections
-model_widgets = [model_header, model_widget, model_num_widget, switch_model_widget]
+# FIXED: Use create_enhanced_model_section to build the model selection UI
+model_widgets = create_enhanced_model_section(wm, SCRIPTS)
 vae_widgets = [vae_header, vae_widget, vae_num_widget]
 lora_widgets = [lora_header, lora_widget]
 additional_widgets = additional_widget_list
@@ -539,9 +531,7 @@ sideContainer = factory.create_vbox(
     class_names=['sideContainer']
 )
 
-# CRITICAL FIX: CSS flexbox properties must use hyphenated values, not underscore notation
-# The ipywidgets Layout trait system enforces strict CSS specification compliance
-# 'flex_start' is invalid - must be 'flex-start' per CSS flexbox specification
+# CRITICAL FIX: Use 'flex-start' instead of 'flex_start' for align_items
 mainContainer = factory.create_hbox(
     [widgetContainer, sideContainer],
     class_names=['mainContainer'],
@@ -557,17 +547,15 @@ check_custom_nodes_deps_widget.layout.display = 'none'
 empowerment_output_widget.add_class('empowerment-output')
 empowerment_output_widget.add_class('hidden')
 
-# FIXED: Improved callback functions with error handling
+# FIXED: Callback for XL models now only updates VAE, LoRA, and ControlNet selectors
 def update_XL_options(change, widget):
-    """FIXED: Better error handling and state management"""
+    """FIXED: Update non-model selectors when XL toggle changes."""
     try:
         is_xl = change['new']
-        
         data_file = '_xl-models-data.py' if is_xl else '_models-data.py'
         
-        # Update options with error handling
+        # Update options with error handling for other selectors
         try:
-            model_widget.options = wm.read_model_data(f"{SCRIPTS}/{data_file}", 'model')
             vae_widget.options = wm.read_model_data(f"{SCRIPTS}/{data_file}", 'vae')
             lora_widget.options = wm.read_model_data(f"{SCRIPTS}/{data_file}", 'lora')
             controlnet_widget.options = wm.read_model_data(f"{SCRIPTS}/{data_file}", 'cnet')
@@ -575,28 +563,16 @@ def update_XL_options(change, widget):
             print(f"Warning: Could not update model options: {e}")
             return
 
-        # FIXED: Use safe defaults for XL vs regular models
+        # Set new default values
         if is_xl:
-            # XL model defaults - use first available XL model
-            xl_model_defaults = list(model_widget.options)[1:4]  # Skip 'none', get first few
             xl_vae_defaults = ['none', 'ALL']
             xl_lora_defaults = ['none']
             xl_controlnet_defaults = ['none']
             
-            model_widget.value = (wm.get_safe_default(model_widget.options, xl_model_defaults),)
             vae_widget.value = wm.get_safe_default(vae_widget.options, xl_vae_defaults)
             lora_widget.value = (wm.get_safe_default(lora_widget.options, xl_lora_defaults),)
             controlnet_widget.value = (wm.get_safe_default(controlnet_widget.options, xl_controlnet_defaults),)
-            
-            # Handle inpainting checkbox for XL
-            inpainting_model_widget.add_class('_disable')
-            inpainting_model_widget.value = False
         else:
-            # Regular model defaults - use your custom models
-            regular_model_defaults = [
-                'D5K6.0',
-                'Merged amateurs - Mixed Amateurs'
-            ]
             regular_vae_defaults = [
                 'vae-ft-mse-840000-ema-pruned | 840000 | 840k SD1.5 VAE - vae-ft-mse-840k',
                 'ClearVAE(SD1.5) - v2.3',
@@ -605,13 +581,9 @@ def update_XL_options(change, widget):
             regular_lora_defaults = ['none']
             regular_controlnet_defaults = ['none']
             
-            model_widget.value = (wm.get_safe_default(model_widget.options, regular_model_defaults),)
             vae_widget.value = wm.get_safe_default(vae_widget.options, regular_vae_defaults)
             lora_widget.value = (wm.get_safe_default(lora_widget.options, regular_lora_defaults),)
             controlnet_widget.value = (wm.get_safe_default(controlnet_widget.options, regular_controlnet_defaults),)
-            
-            # Enable inpainting checkbox for regular models
-            inpainting_model_widget.remove_class('_disable')
             
     except Exception as e:
         print(f"Error in update_XL_options: {e}")
@@ -657,28 +629,13 @@ def update_empowerment(change, widget):
     except Exception as e:
         print(f"Error in update_empowerment: {e}")
 
-def filter_inpainting_models(change, widget):
-    """Filter model list based on inpainting toggle"""
-    is_inpainting = change['new']
-    current_options = list(model_widget.options)
-    
-    if is_inpainting:
-        filtered_options = [opt for opt in current_options if 'inpainting' in opt.lower() or opt == 'none']
-    else:
-        # Re-read the full list to restore non-inpainting models
-        data_file = '_xl-models-data.py' if XL_models_widget.value else '_models-data.py'
-        filtered_options = wm.read_model_data(f"{SCRIPTS}/{data_file}", 'model')
-
-    model_widget.options = filtered_options
-    if model_widget.value not in filtered_options:
-        model_widget.value = (wm.get_safe_default(filtered_options, ['none']),)
-
+# The inpainting filter is now handled by the enhanced model selector's JS
+# The python callback is no longer needed.
 
 # Connecting widgets
 factory.connect_widgets([(change_webui_widget, 'value')], update_change_webui)
-factory.connect_widgets([(XL_models_widget, 'value')], update_XL_options)
+# The XL model update is now connected inside `create_enhanced_model_section`
 factory.connect_widgets([(empowerment_widget, 'value')], update_empowerment)
-factory.connect_widgets([(inpainting_model_widget, 'value')], filter_inpainting_models)
 
 
 # ================ Load / Save - Settings V4 ===============
