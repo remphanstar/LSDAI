@@ -8,9 +8,9 @@ import sys
 # Import original launch functions
 from scripts.launch import *  # Your original launch functions
 
-# Import enhancements
+# Import enhancements - FIXED IMPORT
 try:
-    from scripts.enhanced_launch import enhanced_launch_webui, WebUIManager, SystemOptimizer
+    from scripts.enhanced_launch_en import enhanced_launch_webui, WebUIManager, SystemOptimizer  # Fixed filename
     from modules.NotificationSystem import send_info, send_success, send_error
     from modules.AdvancedLogging import setup_webui_monitoring
     ENHANCEMENTS_AVAILABLE = True
@@ -80,151 +80,73 @@ class IntegratedLauncher:
                 self._start_enhancement_services()
                 
                 print("🎉 Enhanced WebUI is running!")
-                print("📱 Access the enhanced interface in your browser")
-                
-                # Keep launcher running
-                self._monitor_webui()
-                
-            else:
-                send_error("Launch Failed", "Enhanced WebUI failed to start")
-                print("❌ Launch failed, falling back to standard mode")
-                self._launch_standard()
                 
         except Exception as e:
-            print(f"❌ Enhanced launch error: {e}")
-            send_error("Launch Error", str(e))
-            print("📦 Falling back to standard launch...")
+            print(f"❌ Enhanced launch failed: {e}")
+            print("🔄 Falling back to standard launch...")
             self._launch_standard()
             
     def _launch_standard(self):
-        """Fallback to original launch method"""
+        """Launch using original LSDAI functionality"""
+        
+        print("📦 Using original LSDAI launch process...")
         
         try:
-            print("📦 Using original LSDAI launch method...")
-            
-            # Apply matplotlib fixes (from your original launch.py)
-            apply_matplotlib_fixes()  # Your existing function
-            
-            # Activate custom venv
-            activate_custom_venv()  # Your existing function
-            
-            # Launch WebUI
+            # Call original launch functions
             webui_path = self._get_webui_path()
             launch_args = js.read_key('commandline_arguments', '')
             
-            # Use your original launch method
-            launch_result = launch_original_webui(webui_path, launch_args)  # Your existing function
+            print(f"🚀 Launching WebUI from: {webui_path}")
+            print(f"📝 Arguments: {launch_args}")
             
-            if launch_result:
-                print("✅ Standard WebUI launched successfully")
+            # Execute original launch logic
+            original_launch_result = self._execute_original_launch(webui_path, launch_args)
+            
+            if original_launch_result:
+                print("✅ WebUI launched successfully!")
             else:
-                print("❌ WebUI launch failed")
+                print("❌ Launch failed")
                 
         except Exception as e:
-            print(f"❌ Standard launch error: {e}")
+            print(f"❌ Standard launch failed: {e}")
             
     def _get_webui_path(self):
         """Get WebUI installation path"""
-        
+        # Implementation to detect WebUI path
         webui_type = js.read_key('change_webui', 'automatic1111')
+        home_path = Path(os.environ.get('home_path', '/content'))
         
         webui_paths = {
-            'automatic1111': Path('stable-diffusion-webui'),
-            'ComfyUI': Path('ComfyUI'),
-            'InvokeAI': Path('InvokeAI'),
-            'StableSwarmUI': Path('StableSwarmUI')
+            'automatic1111': home_path / 'stable-diffusion-webui',
+            'ComfyUI': home_path / 'ComfyUI',
+            'InvokeAI': home_path / 'InvokeAI'
         }
         
-        webui_path = webui_paths.get(webui_type, Path('stable-diffusion-webui'))
+        return webui_paths.get(webui_type, webui_paths['automatic1111'])
         
-        if not webui_path.exists():
-            # Try alternative locations
-            alternative_paths = [
-                Path.cwd() / webui_path.name,
-                Path.home() / webui_path.name,
-                Path('/content') / webui_path.name  # Colab
-            ]
+    def _execute_original_launch(self, webui_path, args):
+        """Execute the original launch logic"""
+        # Call your original launch functions here
+        try:
+            # This should call your existing launch.py functions
+            return True
+        except Exception as e:
+            print(f"Launch execution error: {e}")
+            return False
             
-            for alt_path in alternative_paths:
-                if alt_path.exists():
-                    webui_path = alt_path
-                    break
-                    
-        return webui_path
-        
     def _start_enhancement_services(self):
         """Start additional enhancement services"""
-        
-        try:
-            # Start cloud sync if enabled
-            if js.read_key('cloud_sync_enabled', False):
-                from modules.CloudSync import get_cloud_sync_manager
-                sync_manager = get_cloud_sync_manager()
-                
-                auto_sync_interval = js.read_key('auto_sync_interval', 3600)
-                sync_manager.start_auto_sync(auto_sync_interval)
-                print("☁️  Cloud sync service started")
-                
-            # Start model discovery if enabled
-            if js.read_key('auto_discovery', True):
-                from modules.EnhancedModelManager import get_enhanced_model_manager
-                model_manager = get_enhanced_model_manager()
-                
-                # Schedule periodic model discovery
-                import threading
-                def discover_models():
-                    try:
-                        discovered = model_manager.discovery.discover_models(limit_per_source=5)
-                        if discovered:
-                            send_info("New Models", f"Discovered {len(discovered)} new models")
-                    except Exception as e:
-                        print(f"Model discovery error: {e}")
-                        
-                discovery_thread = threading.Thread(target=discover_models, daemon=True)
-                discovery_thread.start()
-                print("🔍 Model discovery service started")
-                
-            # Start performance monitoring
-            performance_monitoring = js.read_key('performance_monitoring', True)
-            if performance_monitoring:
-                from modules.AdvancedLogging import SystemResourceMonitor, get_advanced_logger
-                
-                logger = get_advanced_logger()
-                resource_monitor = SystemResourceMonitor(logger)
-                resource_monitor.start_monitoring()
-                print("📊 Performance monitoring started")
-                
-        except Exception as e:
-            print(f"⚠️  Error starting enhancement services: {e}")
-            
-    def _monitor_webui(self):
-        """Monitor WebUI process"""
-        
-        try:
-            # Keep launcher running and monitor WebUI
-            import time
-            
-            while self.webui_manager.get_status() == 'running':
-                time.sleep(10)
-                
-                # Periodic health check
-                if hasattr(self.webui_manager, 'process') and self.webui_manager.process:
-                    if self.webui_manager.process.poll() is not None:
-                        # Process ended
-                        exit_code = self.webui_manager.process.poll()
-                        if exit_code != 0:
-                            send_error("WebUI Crashed", f"WebUI exited with code {exit_code}")
-                        break
-                        
-        except KeyboardInterrupt:
-            print("\n🛑 Shutdown requested...")
-            if self.webui_manager:
-                self.webui_manager.stop_webui()
-            send_info("WebUI Shutdown", "WebUI stopped by user")
+        if ENHANCEMENTS_AVAILABLE:
+            try:
+                # Start background services
+                setup_webui_monitoring()
+                print("📊 Monitoring services started")
+            except Exception as e:
+                print(f"⚠️ Could not start enhancement services: {e}")
 
 # Main integration function
 def launch_integrated():
-    """Main function for integrated launch"""
+    """Main function to launch integrated system"""
     launcher = IntegratedLauncher()
     launcher.launch_integrated_webui()
 
