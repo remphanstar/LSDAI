@@ -11,7 +11,8 @@ This script handles the complete download process for WebUI setup including:
 - Model and asset downloads with proper URL handling
 
 FIXED: Corrected URL processing to handle individual downloads instead of 
-concatenating multiple URLs into a single string
+concatenating multiple URLs into a single string.
+FIXED: Implemented a more robust venv creation method for Colab.
 """
 
 import os
@@ -51,57 +52,56 @@ print("--- LSDAI ENHANCED DOWNLOADER ---")
 print(f"Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}")
 print("===================================")
 
-# 1. VIRTUAL ENVIRONMENT SETUP
-# -----------------------------
+# 1. VIRTUAL ENVIRONMENT SETUP (ROBUST VERSION)
+# ---------------------------------------------
 print("\n🐍 1. Setting up Virtual Environment...")
 print(f"   - Target Venv Path: {VENV_PATH}")
 
 try:
-    # --- ADDED VENV DEPENDENCY INSTALL FALLBACK ---
     if IS_DEBIAN and not VENV_PATH.exists():
-        print("   - Debian-based system detected. Ensuring python3-venv is installed as a fallback.")
+        print("   - Debian-based system detected. Ensuring python3-venv is installed.")
         try:
-            # Using subprocess for cleaner execution and error handling
             subprocess.run(['apt-get', 'update', '-qq'], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
             subprocess.run(['apt-get', 'install', '-y', '-qq', 'python3-venv'], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
             print("     ✅ python3-venv installed or already present.")
         except (subprocess.CalledProcessError, FileNotFoundError) as e:
-            print(f"   - ⚠️  Could not install python3-venv via apt-get. This may cause issues if it's not already present. Error: {e.stderr.decode() if hasattr(e, 'stderr') and e.stderr else e}")
-    # --- END ADDITION ---
+            print(f"   - ⚠️  Could not install python3-venv. This may cause issues. Error: {e.stderr.decode() if hasattr(e, 'stderr') and e.stderr else e}")
 
     if not VENV_PATH.exists():
         print("   - Creating venv directory...")
         VENV_PATH.mkdir(parents=True, exist_ok=True)
         
-        # Create virtual environment
-        subprocess.run([sys.executable, '-m', 'venv', str(VENV_PATH)], 
-                      check=True, capture_output=False)
+        # Create virtual environment WITHOUT pip to avoid ensurepip issues
+        print("   - Creating virtual environment core...")
+        subprocess.run([sys.executable, '-m', 'venv', str(VENV_PATH), '--without-pip'], 
+                       check=True, capture_output=True, text=True)
         
-        # Setup pip in the virtual environment
-        pip_path = VENV_PATH / 'bin' / 'pip' if os.name != 'nt' else VENV_PATH / 'Scripts' / 'pip.exe'
-        
+        # Manually install pip using get-pip.py
         print("   - Downloading get-pip.py...")
-        get_ipython().system('curl -sLo /tmp/get-pip.py https://bootstrap.pypa.io/get-pip.py')
+        get_pip_path = SCR_PATH / "get-pip.py"
+        subprocess.run(['curl', '-sLo', str(get_pip_path), "https://bootstrap.pypa.io/get-pip.py"], check=True)
         
         print("   - Installing pip into the virtual environment...")
-        python_path = VENV_PATH / 'bin' / 'python' if os.name != 'nt' else VENV_PATH / 'Scripts' / 'python.exe'
-        subprocess.run([str(python_path), '/tmp/get-pip.py'], check=True)
+        python_path = VENV_PATH / 'bin' / 'python'
+        subprocess.run([str(python_path), str(get_pip_path)], check=True, capture_output=True, text=True)
         
         # Install requirements
+        pip_path = VENV_PATH / 'bin' / 'pip'
         requirements_file = SCRIPTS_PATH / 'requirements.txt'
         if requirements_file.exists():
             print(f"   - Installing dependencies from {requirements_file}...")
             subprocess.run([str(pip_path), 'install', '-r', str(requirements_file)], 
-                          check=True, capture_output=False)
+                           check=True, capture_output=False)
         else:
             print("   - ⚠️ requirements.txt not found. Skipping dependency installation.")
     else:
-        print("   - ✅ Venv with pip already exists. Skipping creation.")
+        print("   - ✅ Venv already exists. Skipping creation.")
 except Exception as e:
     print(f"   - ❌ ERROR during Venv setup: {e}")
     print("      Please check the error messages above. The notebook may not have permission to create directories or run commands.")
 
 print("   - Venv setup complete.")
+
 
 # 2. WEBUI INSTALLATION
 # ---------------------
@@ -177,7 +177,6 @@ try:
     model_files = '_xl_models_data.py' if WIDGETS_DATA.get('XL_models') else '_models_data.py'
     models_data_path = SCRIPTS_PATH / model_files
     
-    # Load model data if available
     local_vars = {}
     if models_data_path.exists():
         with open(models_data_path) as f:
@@ -191,7 +190,6 @@ try:
     download_queue = []
 
     def add_to_queue(selection, data_dict):
-        """Add selected items from data dictionary to download queue"""
         if not selection or selection == ['none']: 
             return
         
@@ -207,21 +205,17 @@ try:
                         if isinstance(sub_item, dict) and sub_item.get('url'): 
                             download_queue.append(sub_item['url'])
     
-    # Add pre-defined model selections to queue
     add_to_queue(WIDGETS_DATA.get('model'), model_list)
     add_to_queue(WIDGETS_DATA.get('vae'), vae_list)
     add_to_queue(WIDGETS_DATA.get('lora'), lora_list)
     add_to_queue(WIDGETS_DATA.get('controlnet'), controlnet_list)
     
-    # Add custom URLs from text fields
     for url_key in ['Model_url', 'Vae_url', 'LoRA_url', 'Embedding_url']:
         urls_string = WIDGETS_DATA.get(url_key, '')
         if urls_string and urls_string.strip():
-            # Split by comma and clean up each URL
             custom_urls = [url.strip() for url in urls_string.split(',') if url.strip()]
             download_queue.extend(custom_urls)
 
-    # Process downloads - FIXED: Handle each URL individually
     if not download_queue:
         print("   - No models selected for download.")
     else:
@@ -233,8 +227,6 @@ try:
         for i, url in enumerate(download_queue, 1):
             try:
                 print(f"\n   - [{i}/{len(download_queue)}] Processing: {url}")
-                
-                # FIXED: Call m_download for each URL individually
                 success = m_download(url, log=True, unzip=True)
                 
                 if success:
@@ -248,7 +240,6 @@ try:
                 failed_downloads += 1
                 print(f"     ❌ Download error: {e}")
         
-        # Summary report
         print(f"\n   📊 Download Summary:")
         print(f"      - Total items: {len(download_queue)}")
         print(f"      - Successful: {successful_downloads}")
