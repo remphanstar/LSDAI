@@ -122,22 +122,25 @@ class WidgetManager:
     def build_ui(self):
         """Constructs and returns the entire widget UI."""
         
-        # --- HEADER CONTROLS (Single Line Layout using ToggleButtons) ---
-        self.widgets['latest_webui'] = widgets.ToggleButton(value=True, description='Update WebUI', button_style='')
-        self.widgets['latest_extensions'] = widgets.ToggleButton(value=True, description='Update Extensions', button_style='')
-        self.widgets['inpainting_model'] = widgets.ToggleButton(value=False, description='Inpainting', button_style='')
-        self.widgets['XL_models'] = widgets.ToggleButton(value=False, description='SDXL', button_style='')
-        self.widgets['detailed_download'] = widgets.ToggleButton(value=False, description='Detailed Output', button_style='')
+        # --- HEADER CONTROLS ---
+        self.widgets['latest_webui'] = widgets.ToggleButton(value=True, description='Update WebUI', button_style='', icon='check-square-o')
+        self.widgets['latest_extensions'] = widgets.ToggleButton(value=True, description='Update Extensions', button_style='', icon='check-square-o')
+        self.widgets['inpainting_model'] = widgets.ToggleButton(value=False, description='Inpainting', button_style='', icon='square-o')
+        self.widgets['XL_models'] = widgets.ToggleButton(value=False, description='SDXL', button_style='', icon='square-o')
         
-        left_toggles = self.factory.create_hbox([self.widgets['latest_webui'], self.widgets['latest_extensions']], class_names=['header-group'])
-        right_toggles = self.factory.create_hbox([self.widgets['inpainting_model'], self.widgets['XL_models']], class_names=['header-group'])
+        left_toggles = self.factory.create_hbox([self.widgets['latest_webui'], self.widgets['latest_extensions']], class_names=['header-left-group'])
+        right_toggles = self.factory.create_hbox([self.widgets['inpainting_model'], self.widgets['XL_models']], class_names=['header-right-group'])
         
-        self.widgets['change_webui'] = self.factory.create_dropdown(options=list(self.WEBUI_SELECTION.keys()), description='WebUI:', value='A1111')
+        self.widgets['change_webui'] = self.factory.create_dropdown(
+            options=list(self.WEBUI_SELECTION.keys()), 
+            description='WebUI:', 
+            value='A1111'
+        )
+        self.widgets['detailed_download'] = widgets.ToggleButton(value=False, description='Detailed Output', button_style='', tooltip='Toggle detailed download logs', icon='info')
         
         header_controls = self.factory.create_hbox([
             left_toggles,
-            self.widgets['change_webui'],
-            self.widgets['detailed_download'],
+            self.factory.create_vbox([self.widgets['change_webui'], self.widgets['detailed_download']], class_names=['header-center-group']),
             right_toggles
         ], class_names=['header-controls'])
 
@@ -157,7 +160,7 @@ class WidgetManager:
         tab_widget.add_class('selection-tabs')
         
         # --- ACCORDION FOR OTHER SETTINGS ---
-        # 1. Additional Configuration (Now includes API Tokens)
+        # 1. Additional Configuration
         self.widgets['check_custom_nodes_deps'] = self.factory.create_checkbox(description='Check ComfyUI Dependencies', value=True, layout={'display': 'none'})
         self.widgets['commit_hash'] = self.factory.create_text(description='Commit Hash:', placeholder='Optional: Use a specific commit')
         self.widgets['commandline_arguments'] = self.factory.create_text(description='Arguments:', value=self.WEBUI_SELECTION['A1111'])
@@ -205,28 +208,9 @@ class WidgetManager:
         save_button = self.factory.create_button(description='Save Settings', class_names=['button', 'button_save'])
         save_button.on_click(self.save_data)
 
-        # --- SIDEBAR FOR G-DRIVE, IMPORT/EXPORT ---
-        BTN_STYLE = {'width': '48px', 'height': '48px'}
-        TOOLTIPS = ("Disconnect Google Drive", "Connect Google Drive")
-        GD_status = js.read(SETTINGS_PATH, 'mountGDrive', False)
-        self.gdrive_button = self.factory.create_button(description='📁', layout=BTN_STYLE, class_names=['side-button'])
-        self.gdrive_button.tooltip = TOOLTIPS[not GD_status]
-        
-        self.export_button = self.factory.create_button(description='📤', layout=BTN_STYLE, class_names=['side-button'])
-        self.export_button.tooltip = "Export settings to JSON"
-        
-        self.import_button = self.factory.create_button(description='📥', layout=BTN_STYLE, class_names=['side-button'])
-        self.import_button.tooltip = "Import settings from JSON"
-
-        self.notification_popup = self.factory.create_html('', class_names=['notification-popup', 'hidden'])
-        
-        sidebar = self.factory.create_vbox([self.gdrive_button, self.export_button, self.import_button, self.notification_popup], class_names=['sidebar'])
-        if not IN_COLAB:
-            sidebar.layout.display = 'none'
-
         # --- FINAL LAYOUT ---
         main_content = self.factory.create_vbox([header_controls, tab_widget, accordion, save_button], class_names=['main-content'])
-        return self.factory.create_hbox([main_content, sidebar], class_names=['main-ui-container'])
+        return main_content
 
     def setup_callbacks(self):
         """Connects widget events to their handler functions."""
@@ -235,12 +219,6 @@ class WidgetManager:
         self.factory.connect_widgets([(self.widgets['empowerment'], 'value')], self.update_empowerment)
         self.factory.connect_widgets([(self.widgets['inpainting_model'], 'value')], self.filter_inpainting_models)
         
-        if IN_COLAB:
-            self.gdrive_button.on_click(self.handle_gdrive_toggle)
-            self.export_button.on_click(self.export_settings)
-            self.import_button.on_click(self.import_settings)
-            output.register_callback('importSettingsFromJS', self.apply_imported_settings)
-
         self.update_empowerment({'new': self.widgets['empowerment'].value}, None)
         self.update_change_webui({'new': self.widgets['change_webui'].value}, None)
 
@@ -285,47 +263,14 @@ class WidgetManager:
         
         self.update_selection_list('model', options)
 
-    # --- DATA & SIDEBAR FUNCTIONS ---
-    def handle_gdrive_toggle(self, btn):
-        btn.toggle = not getattr(btn, 'toggle', False)
-        btn.tooltip = ("Disconnect Google Drive", "Connect Google Drive")[not btn.toggle]
-        btn.remove_class('active') if not btn.toggle else btn.add_class('active')
-
-    def show_notification(self, message, message_type='info'):
-        icon_map = {'success': '✅', 'error': '❌', 'info': 'ℹ️', 'warning': '⚠️'}
-        icon = icon_map.get(message_type, 'ℹ️')
-        self.notification_popup.value = f'<div class="notification {message_type}"><span class="icon">{icon}</span>{message}</div>'
-        self.notification_popup.remove_class('hidden')
-        display(Javascript("setTimeout(() => { document.querySelector('.notification-popup').classList.add('hidden'); }, 3000)"))
-
-    def export_settings(self, btn):
-        widgets_data = self.save_settings_to_dict()
-        settings_data = {'widgets': widgets_data, 'mountGDrive': getattr(self.gdrive_button, 'toggle', False)}
-        display(Javascript(f'downloadJson({json.dumps(settings_data)});'))
-        self.show_notification("Settings exported!", "success")
-
-    def import_settings(self, btn):
-        display(Javascript('openFilePicker();'))
-
-    def apply_imported_settings(self, data):
-        try:
-            if 'widgets' in data:
-                self.load_settings_data(data['widgets'])
-            if 'mountGDrive' in data:
-                self.gdrive_button.toggle = data['mountGDrive']
-                self.gdrive_button.remove_class('active') if not data['mountGDrive'] else self.gdrive_button.add_class('active')
-            self.show_notification("Settings imported!", "success")
-        except Exception as e:
-            self.show_notification(f"Import failed: {e}", "error")
-
     def get_selected_toggles(self, data_type):
         """Helper to get the names of selected toggle buttons for a given type."""
         if data_type in self.widgets and isinstance(self.widgets[data_type], list):
             return [btn.description for btn in self.widgets[data_type] if btn.value]
         return []
 
-    def save_settings_to_dict(self):
-        """Gathers current widget values into a dictionary for saving/exporting."""
+    def save_settings(self):
+        """Saves the current widget states to the settings.json file."""
         widgets_values = {}
         for key in self.settings_keys:
             if key in ['model', 'vae', 'lora', 'controlnet']:
@@ -335,54 +280,43 @@ class WidgetManager:
                      widgets_values[key] = 'on' if self.widgets[key].value else 'off'
                 else:
                     widgets_values[key] = self.widgets[key].value
-        return widgets_values
-
-    def save_settings(self):
-        """Saves the current widget states to the settings.json file."""
-        widgets_values = self.save_settings_to_dict()
         js.save(SETTINGS_PATH, 'WIDGETS', widgets_values)
-        js.save(SETTINGS_PATH, 'mountGDrive', getattr(self.gdrive_button, 'toggle', False))
         update_current_webui(self.widgets['change_webui'].value)
-
-    def load_settings_data(self, widget_data):
-        for key in self.settings_keys:
-            if key in widget_data and key in self.widgets:
-                try:
-                    if key in ['civitai_token', 'huggingface_token', 'zrok_token', 'ngrok_token'] and self.widgets[key].disabled:
-                        continue
-                    if key in ['model', 'vae', 'lora', 'controlnet']:
-                        selected_names = widget_data.get(key, [])
-                        for btn in self.widgets[key]:
-                            btn.value = btn.description in selected_names
-                    elif isinstance(self.widgets[key], widgets.ToggleButton):
-                        self.widgets[key].value = widget_data.get(key) == 'on'
-                    else:
-                        self.widgets[key].value = widget_data.get(key, self.widgets[key].value)
-                except Exception as e:
-                    print(f"Warning: could not load setting for {key}: {e}")
 
     def load_settings(self):
         if js.key_exists(SETTINGS_PATH, 'WIDGETS'):
-            self.load_settings_data(js.read(SETTINGS_PATH, 'WIDGETS'))
-        if IN_COLAB:
-            gdrive_status = js.read(SETTINGS_PATH, 'mountGDrive', False)
-            self.gdrive_button.toggle = gdrive_status
-            self.gdrive_button.remove_class('active') if not gdrive_status else self.gdrive_button.add_class('active')
+            widget_data = js.read(SETTINGS_PATH, 'WIDGETS')
+            for key in self.settings_keys:
+                if key in widget_data and key in self.widgets:
+                    try:
+                        if key in ['civitai_token', 'huggingface_token', 'zrok_token', 'ngrok_token'] and self.widgets[key].disabled:
+                            continue
+                        if key in ['model', 'vae', 'lora', 'controlnet']:
+                            selected_names = widget_data.get(key, [])
+                            for btn in self.widgets[key]:
+                                btn.value = btn.description in selected_names
+                        elif isinstance(self.widgets[key], widgets.ToggleButton):
+                            self.widgets[key].value = widget_data.get(key) == 'on'
+                        else:
+                            self.widgets[key].value = widget_data.get(key, self.widgets[key].value)
+                    except Exception as e:
+                        print(f"Warning: could not load setting for {key}: {e}")
 
     def save_data(self, button):
         self.save_settings()
-        self.show_notification("Settings Saved!", "success")
-        self.factory.close(main_container, class_names=['hide'], delay=0.5)
+        # Simple feedback without complex JS
+        button.description = "Settings Saved!"
+        button.button_style = 'success'
+        import time
+        time.sleep(2)
+        button.description = "Save Settings"
+        button.button_style = ''
 
 # --- EXECUTION ---
 if __name__ == "__main__":
     WidgetFactory().load_css(CSS / 'enhanced-widgets.css')
-    if IN_COLAB:
-        WidgetFactory().load_js(JS / 'main-widgets.js')
-
     manager = WidgetManager()
     main_container = manager.build_ui()
     display(main_container)
-    
     manager.load_settings()
     manager.setup_callbacks()
