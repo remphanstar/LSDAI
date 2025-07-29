@@ -3,6 +3,10 @@ import json_utils as js
 from pathlib import Path
 import subprocess
 import time
+import os
+
+# Get settings path from environment or default
+SETTINGS_PATH = Path(os.environ.get('settings_path', '/content/LSDAI/settings.json'))
 
 # Import original downloading functions
 try:
