@@ -47,7 +47,7 @@ def detect_platform_home():
 
 # FIXED: Platform-agnostic path detection
 HOME = detect_platform_home()
-SCR_PATH = HOME / 'ANXETY'
+SCR_PATH = HOME / 'LSDAI'
 SETTINGS_PATH = SCR_PATH / 'settings.json'
 VENV_PATH = HOME / 'venv'
 MODULES_FOLDER = SCR_PATH / "modules"
@@ -74,7 +74,7 @@ SUPPORTED_ENVS = {
     'LIGHTNING_AI': 'Lightning.ai'
 }
 
-# FIXED: Moved enhanced_model_selector.py to the modules list
+# FIXED: File structure - scripts are now directly in scripts folder
 FILE_STRUCTURE = {
     'CSS': ['main-widgets.css', 'download-result.css', 'auto-cleaner.css'],
     'JS': ['main-widgets.js'],
@@ -113,7 +113,7 @@ def reinitialize_paths(base_path):
     """Re-initializes global path variables based on a new home directory."""
     global HOME, SCR_PATH, SETTINGS_PATH, VENV_PATH, MODULES_FOLDER
     HOME = base_path
-    SCR_PATH = HOME / 'ANXETY'
+    SCR_PATH = HOME / 'LSDAI'
     SETTINGS_PATH = SCR_PATH / 'settings.json'
     VENV_PATH = HOME / 'venv'
     MODULES_FOLDER = SCR_PATH / "modules"
@@ -266,94 +266,4 @@ async def download_file(session: aiohttp.ClientSession, url: str, path: Path, ma
                 temp_path.rename(path)
                 return (True, url, path, None)
         except asyncio.TimeoutError:
-            error_msg = f"Timeout error (attempt {attempt + 1}/{max_retries})"
-            if attempt == max_retries - 1:
-                return (False, url, path, error_msg)
-            await asyncio.sleep(2 ** attempt)
-        except aiohttp.ClientResponseError as e:
-            error_msg = f"HTTP error {e.status}: {e.message}"
-            if e.status >= 500 and attempt < max_retries - 1:
-                await asyncio.sleep(2 ** attempt)
-                continue
-            return (False, url, path, error_msg)
-        except Exception as e:
-            error_msg = f"Error: {str(e)}"
-            if attempt == max_retries - 1:
-                return (False, url, path, error_msg)
-            await asyncio.sleep(2 ** attempt)
-    return (False, url, path, "Max retries exceeded")
-
-async def download_files_async(lang, fork_user, fork_repo, branch, log_errors):
-    """Main download executor with error logging and improved reliability."""
-    base_url = f"{BASE_GITHUB_URL}/{fork_user}/{fork_repo}/{branch}"
-    file_list = generate_file_list(FILE_STRUCTURE, base_url, lang)
-    connector = aiohttp.TCPConnector(limit=10, limit_per_host=5)
-    timeout = aiohttp.ClientTimeout(total=60, connect=10)
-    async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
-        tasks = [download_file(session, url, path) for url, path in file_list]
-        errors = []
-        successful = 0
-        for future in tqdm(asyncio.as_completed(tasks), total=len(tasks), desc="Downloading files", unit="file"):
-            success, url, path, error = await future
-            if success:
-                successful += 1
-            else:
-                errors.append((url, path, error))
-        clear_output()
-        print(f"Downloaded {successful}/{len(file_list)} files successfully")
-        if errors:
-            print(f"\n{len(errors)} files failed to download")
-            if log_errors:
-                print("\nErrors occurred during download:")
-                for url, path, error in errors[:10]:
-                    print(f"URL: {url}\nPath: {path}\nError: {error}\n")
-                if len(errors) > 10:
-                    print(f"... and {len(errors) - 10} more errors")
-            critical_files = ['json_utils.py', '_season.py']
-            critical_errors = [e for e in errors if any(cf in str(e[1]) for cf in critical_files)]
-            if critical_errors:
-                raise RuntimeError(f"Critical files failed to download: {[str(e[1]) for e in critical_errors]}")
-
-# ===================== MAIN EXECUTION =====================
-
-async def main_async(args=None):
-    """Entry point with improved error handling."""
-    parser = argparse.ArgumentParser(description='ANXETY Download Manager')
-    parser.add_argument('--lang', default=DEFAULT_LANG, help=f"Language to be used (default: {DEFAULT_LANG})")
-    parser.add_argument('--branch', default=DEFAULT_BRANCH, help=f"Branch to download files from (default: {DEFAULT_BRANCH})")
-    parser.add_argument('--fork', default=None, help="Specify project fork (user or user/repo)")
-    parser.add_argument('-s', '--skip-download', action="store_true", help="Skip downloading files")
-    parser.add_argument('-l', "--log", action="store_true", help="Enable logging of download errors")
-    args, _ = parser.parse_known_args(args)
-    try:
-        env = detect_environment()
-        print(f"🌍 Detected environment: {env}")
-        print(f"📁 Using home directory: {HOME}")
-        
-        user, repo = parse_fork_arg(args.fork)
-        if not args.skip_download:
-            await download_files_async(args.lang, user, repo, args.branch, args.log)
-        setup_module_folder()
-        env_data = create_environment_data(env, args.lang, user, repo, args.branch)
-        save_env_to_json(env_data, SETTINGS_PATH)
-        if CIVITAI_API_TOKEN:
-            os.environ['CIVITAI_API_TOKEN'] = CIVITAI_API_TOKEN
-        try:
-            from _season import display_info
-            display_info(
-                env=env,
-                scr_folder=os.environ['scr_path'],
-                branch=args.branch,
-                lang=args.lang,
-                fork=args.fork
-            )
-        except ImportError as e:
-            print(f"Warning: Could not load season display: {e}")
-            print("Setup completed successfully!")
-    except Exception as e:
-        print(f"Setup failed: {str(e)}")
-        print("Please check your internet connection and try again.")
-        raise
-
-if __name__ == "__main__":
-    asyncio.run(main_async())
+            error_msg = f"Timeout error (attempt {attempt + 1}/{
