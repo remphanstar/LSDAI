@@ -3,6 +3,7 @@
 import json
 from pathlib import Path
 from typing import Any, Dict, Optional, Union
+import os
 
 # --- Internal Helper Functions ---
 
@@ -79,13 +80,13 @@ def save(file_path: Union[str, Path], key: str, value: Any):
     _set_nested(data, key, value)
     return write(file_path, data)
 
-def update(file_path: Union[str, Path], update_data: Dict):
+def update(file_path: Union[str, Path], key: str, update_dict: Dict):
     """
-    Updates a JSON file by merging a dictionary into it.
-    This is a non-destructive update for top-level keys.
+    Updates a nested dictionary within a JSON file.
+    This is a destructive update for the specified key.
     """
     data = read(file_path)
-    data.update(update_data)
+    _set_nested(data, key, update_dict)
     return write(file_path, data)
 
 def key_exists(file_path: Union[str, Path], key: str) -> bool:
