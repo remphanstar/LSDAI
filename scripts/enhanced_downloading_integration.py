@@ -1,261 +1,268 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Enhanced Downloading Integration - Fixed URL Processing
-LSDAI v2.0 Enhancement Suite - Download Management Script
-
-This script handles the complete download process for WebUI setup including:
-- Virtual environment setup with custom requirements
-- WebUI installation and updates  
-- Extension installation from URLs
-- Model and asset downloads with proper URL handling
-
-FIXED: Corrected URL processing to handle individual downloads instead of 
-concatenating multiple URLs into a single string.
-FIXED: Implemented a more robust venv creation method for Colab.
-"""
+# ~ enhanced_downloading_integration.py | With Complete Verbosity Integration ~
 
 import os
 import sys
-import subprocess
-import time
-from pathlib import Path
 import json
+from pathlib import Path
 
-# --- ADDED PLATFORM CHECK AND VENV DEPENDENCY INSTALL ---
-IS_DEBIAN = os.path.exists('/etc/debian_version')
-# --- END ADDITION ---
+# Import verbose output manager
+from modules.verbose_output_manager import (
+    get_verbose_manager, VerbosityLevel, 
+    vprint, vrun, vpip_install, vdownload, vgit_clone
+)
 
-# Setup environment paths
-HOME = Path(os.environ.get('home_path', '/content'))
-SCR_PATH = Path(os.environ.get('scr_path', HOME / 'LSDAI'))
-VENV_PATH = Path(os.environ.get('venv_path', HOME / 'venv'))
-SETTINGS_PATH = Path(os.environ.get('settings_path', SCR_PATH / 'settings.json'))
-SCRIPTS_PATH = SCR_PATH / 'scripts'
-
-# Add modules to Python path for imports
-if str(SCR_PATH / 'modules') not in sys.path:
-    sys.path.insert(0, str(SCR_PATH / 'modules'))
-
-# Import required modules
-try:
-    import json_utils as js
-    from webui_utils import get_current_webui, get_webui_config, get_extensions_directory
-    print("✅ Core modules imported successfully.")
-except ImportError as e:
-    print(f"❌ Failed to import core modules: {e}")
-    print("   Make sure the LSDAI project structure is properly set up.")
-    sys.exit(1)
-
-# Enhanced downloader header
-print("--- LSDAI ENHANCED DOWNLOADER ---")
-print(f"Timestamp: {time.strftime('%Y-%m-%d %H:%M:%S')}")
-print("===================================")
-
-# 1. VIRTUAL ENVIRONMENT SETUP (ROBUST VERSION)
-# ---------------------------------------------
-print("\n🐍 1. Setting up Virtual Environment...")
-print(f"   - Target Venv Path: {VENV_PATH}")
-
-try:
-    if IS_DEBIAN and not VENV_PATH.exists():
-        print("   - Debian-based system detected. Ensuring python3-venv is installed.")
+class VerboseDownloadManager:
+    """Download manager with complete verbosity integration"""
+    
+    def __init__(self):
+        self.verbose_manager = get_verbose_manager()
+        self.base_path = Path(os.environ.get('home_path', '/content'))
+        self.settings_path = Path(os.environ.get('settings_path', '/content/LSDAI/settings.json'))
+    
+    def setup_venv(self):
+        """Setup virtual environment with verbose output"""
+        venv_path = self.base_path / 'venv'
+        
+        vprint("🐍 Setting up virtual environment...", VerbosityLevel.NORMAL)
+        vprint(f"   Target path: {venv_path}", VerbosityLevel.DETAILED)
+        
+        if venv_path.exists():
+            vprint("✅ Virtual environment already exists", VerbosityLevel.NORMAL)
+            return True
+        
+        # Create venv with verbose output
+        vprint("📦 Creating new virtual environment...", VerbosityLevel.DETAILED)
+        
         try:
-            subprocess.run(['apt-get', 'update', '-qq'], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
-            subprocess.run(['apt-get', 'install', '-y', '-qq', 'python3-venv'], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
-            print("     ✅ python3-venv installed or already present.")
-        except (subprocess.CalledProcessError, FileNotFoundError) as e:
-            print(f"   - ⚠️  Could not install python3-venv. This may cause issues. Error: {e.stderr.decode() if hasattr(e, 'stderr') and e.stderr else e}")
-
-    if not VENV_PATH.exists():
-        print("   - Creating venv directory...")
-        VENV_PATH.mkdir(parents=True, exist_ok=True)
-        
-        # Create virtual environment WITHOUT pip to avoid ensurepip issues
-        print("   - Creating virtual environment core...")
-        subprocess.run([sys.executable, '-m', 'venv', str(VENV_PATH), '--without-pip'], 
-                       check=True, capture_output=True, text=True)
-        
-        # Manually install pip using get-pip.py
-        print("   - Downloading get-pip.py...")
-        get_pip_path = SCR_PATH / "get-pip.py"
-        subprocess.run(['curl', '-sLo', str(get_pip_path), "https://bootstrap.pypa.io/get-pip.py"], check=True)
-        
-        print("   - Installing pip into the virtual environment...")
-        python_path = VENV_PATH / 'bin' / 'python'
-        subprocess.run([str(python_path), str(get_pip_path)], check=True, capture_output=True, text=True)
-        
-        # Install requirements
-        pip_path = VENV_PATH / 'bin' / 'pip'
-        requirements_file = SCRIPTS_PATH / 'requirements.txt'
-        if requirements_file.exists():
-            print(f"   - Installing dependencies from {requirements_file}...")
-            subprocess.run([str(pip_path), 'install', '-r', str(requirements_file)], 
-                           check=True, capture_output=False)
-        else:
-            print("   - ⚠️ requirements.txt not found. Skipping dependency installation.")
-    else:
-        print("   - ✅ Venv already exists. Skipping creation.")
-except Exception as e:
-    print(f"   - ❌ ERROR during Venv setup: {e}")
-    print("      Please check the error messages above. The notebook may not have permission to create directories or run commands.")
-
-print("   - Venv setup complete.")
-
-
-# 2. WEBUI INSTALLATION
-# ---------------------
-print("\n🚀 2. Installing WebUI...")
-try:
-    WEBUI_TYPE = get_current_webui()
-    WEBUI_CONFIG = get_webui_config(WEBUI_TYPE)
-    WEBUI_PATH = WEBUI_CONFIG['install_path']
-    WEBUI_REPO_URL = WEBUI_CONFIG['repo_url']
+            # Raw mode shows full python -m venv output
+            vrun([sys.executable, '-m', 'venv', str(venv_path)])
+            vprint("✅ Virtual environment created successfully", VerbosityLevel.NORMAL)
+            return True
+        except Exception as e:
+            vprint(f"❌ Failed to create virtual environment: {e}", VerbosityLevel.MINIMAL)
+            return False
     
-    print(f"   - Selected WebUI: {WEBUI_TYPE}")
-    print(f"   - Target Path: {WEBUI_PATH}")
-
-    if not WEBUI_PATH.exists():
-        print(f"   - Cloning from {WEBUI_REPO_URL}...")
-        get_ipython().system(f'git clone --depth 1 {WEBUI_REPO_URL} "{WEBUI_PATH}"')
-    else:
-        print("   - ✅ WebUI directory already exists. Skipping clone.")
-        print("   - Attempting to pull latest changes...")
-        os.chdir(WEBUI_PATH)
-        get_ipython().system('git pull')
-        os.chdir(str(HOME))
-
-except Exception as e:
-    print(f"   - ❌ ERROR during WebUI installation: {e}")
-
-print("   - WebUI installation step complete.")
-
-# 3. EXTENSION INSTALLATION
-# -------------------------
-print("\n🔧 3. Installing Extensions...")
-try:
-    WIDGETS_DATA = js.read(SETTINGS_PATH, 'WIDGETS', {})
-    EXTENSIONS_URLS_STR = WIDGETS_DATA.get('Extensions_url', '')
-    EXTENSIONS_PATH = get_extensions_directory(WEBUI_TYPE)
-    
-    print(f"   - Target Extensions Directory: {EXTENSIONS_PATH}")
-    EXTENSIONS_PATH.mkdir(parents=True, exist_ok=True)
-
-    if not EXTENSIONS_URLS_STR or not EXTENSIONS_URLS_STR.strip():
-        print("   - No extension URLs provided. Skipping.")
-    else:
-        urls = [url.strip() for url in EXTENSIONS_URLS_STR.split(',') if url.strip()]
-        print(f"   - Found {len(urls)} extension(s) to install.")
+    def install_webui(self, webui_type='automatic1111'):
+        """Install WebUI with verbose progress tracking"""
         
-        for url in urls:
-            try:
-                repo_name = url.split('/')[-1].replace('.git', '')
-                target_path = EXTENSIONS_PATH / repo_name
-                print(f"\n   - Processing: {repo_name}")
-                if not target_path.exists():
-                    get_ipython().system(f'git clone "{url}" "{target_path}"')
-                else:
-                    print(f"     - ✅ Already exists. Skipping clone.")
-            except Exception as e:
-                print(f"     - ❌ ERROR cloning {url}: {e}")
-
-except Exception as e:
-    print(f"   - ❌ ERROR during extension installation: {e}")
-
-print("   - Extension installation step complete.")
-
-
-# 4. MODEL & ASSET DOWNLOAD - FIXED URL PROCESSING
-# ------------------------------------------------
-print("\n🎨 4. Downloading Models and Assets...")
-print("   - Reading from settings.json to download selected assets.")
-
-try:
-    from modules.Manager import m_download
-    
-    WIDGETS_DATA = js.read(SETTINGS_PATH, 'WIDGETS', {})
-    model_files = '_xl_models_data.py' if WIDGETS_DATA.get('XL_models') else '_models_data.py'
-    models_data_path = SCRIPTS_PATH / model_files
-    
-    local_vars = {}
-    if models_data_path.exists():
-        with open(models_data_path) as f:
-            exec(f.read(), {}, local_vars)
-    
-    model_list = local_vars.get('model_list', {})
-    vae_list = local_vars.get('vae_list', {})
-    lora_list = local_vars.get('lora_list', {})
-    controlnet_list = local_vars.get('controlnet_list', {})
-
-    download_queue = []
-
-    def add_to_queue(selection, data_dict):
-        if not selection or selection == ['none']: 
-            return
+        webui_configs = {
+            'automatic1111': {
+                'repo': 'https://github.com/AUTOMATIC1111/stable-diffusion-webui',
+                'path': 'stable-diffusion-webui'
+            },
+            'comfyui': {
+                'repo': 'https://github.com/comfyanonymous/ComfyUI',
+                'path': 'ComfyUI'
+            }
+        }
         
-        items = selection if isinstance(selection, list) else [selection]
-        for item_name in items:
-            if item_name in data_dict:
-                data = data_dict[item_name]
-                if isinstance(data, dict):
-                    if data.get('url'): 
-                        download_queue.append(data['url'])
-                elif isinstance(data, list):
-                    for sub_item in data:
-                        if isinstance(sub_item, dict) and sub_item.get('url'): 
-                            download_queue.append(sub_item['url'])
-    
-    add_to_queue(WIDGETS_DATA.get('model'), model_list)
-    add_to_queue(WIDGETS_DATA.get('vae'), vae_list)
-    add_to_queue(WIDGETS_DATA.get('lora'), lora_list)
-    add_to_queue(WIDGETS_DATA.get('controlnet'), controlnet_list)
-    
-    for url_key in ['Model_url', 'Vae_url', 'LoRA_url', 'Embedding_url']:
-        urls_string = WIDGETS_DATA.get(url_key, '')
-        if urls_string and urls_string.strip():
-            custom_urls = [url.strip() for url in urls_string.split(',') if url.strip()]
-            download_queue.extend(custom_urls)
-
-    if not download_queue:
-        print("   - No models selected for download.")
-    else:
-        print(f"   - Starting download of {len(download_queue)} item(s)...")
+        if webui_type not in webui_configs:
+            vprint(f"❌ Unknown WebUI type: {webui_type}", VerbosityLevel.MINIMAL)
+            return False
         
-        successful_downloads = 0
-        failed_downloads = 0
+        config = webui_configs[webui_type]
+        install_path = self.base_path / config['path']
         
-        for i, url in enumerate(download_queue, 1):
-            try:
-                print(f"\n   - [{i}/{len(download_queue)}] Processing: {url}")
-                success = m_download(url, log=True, unzip=True)
+        vprint(f"🚀 Installing {webui_type} WebUI...", VerbosityLevel.NORMAL)
+        vprint(f"   Repository: {config['repo']}", VerbosityLevel.DETAILED)
+        vprint(f"   Install path: {install_path}", VerbosityLevel.DETAILED)
+        
+        # Check if already installed
+        if install_path.exists():
+            vprint(f"✅ {webui_type} already installed", VerbosityLevel.NORMAL)
+            
+            # Try to update in verbose modes
+            if self.verbose_manager.should_show(VerbosityLevel.DETAILED):
+                vprint("🔄 Checking for updates...", VerbosityLevel.DETAILED)
+                try:
+                    vrun(['git', 'pull'], cwd=install_path)
+                    vprint("✅ WebUI updated to latest version", VerbosityLevel.DETAILED)
+                except:
+                    vprint("⚠️ Could not update WebUI", VerbosityLevel.DETAILED)
+            
+            return True
+        
+        # Clone repository with verbose output
+        success = vgit_clone(config['repo'], install_path)
+        
+        if success:
+            vprint(f"✅ {webui_type} WebUI installed successfully", VerbosityLevel.NORMAL)
+            
+            # Install requirements if they exist
+            requirements_file = install_path / 'requirements.txt'
+            if requirements_file.exists():
+                vprint("📦 Installing WebUI requirements...", VerbosityLevel.NORMAL)
+                vpip_install(['-r', str(requirements_file)])
+        
+        return success
+    
+    def download_models(self):
+        """Download selected models with verbose progress"""
+        
+        # Load selected models from settings
+        try:
+            with open(self.settings_path, 'r') as f:
+                settings = json.load(f)
+            
+            selected_models = settings.get('WIDGETS', {}).get('model', [])
+            selected_vaes = settings.get('WIDGETS', {}).get('vae', [])
+            selected_loras = settings.get('WIDGETS', {}).get('lora', [])
+            
+        except Exception as e:
+            vprint(f"❌ Could not load settings: {e}", VerbosityLevel.MINIMAL)
+            return False
+        
+        total_downloads = len(selected_models) + len(selected_vaes) + len(selected_loras)
+        
+        if total_downloads == 0:
+            vprint("⚠️ No models selected for download", VerbosityLevel.NORMAL)
+            return True
+        
+        vprint(f"📥 Starting download of {total_downloads} items...", VerbosityLevel.NORMAL)
+        
+        # Download models
+        success_count = 0
+        
+        for i, model_name in enumerate(selected_models, 1):
+            vprint(f"   [{i}/{len(selected_models)}] Processing model: {model_name}", VerbosityLevel.NORMAL)
+            
+            # Get model URL from model data
+            model_url = self.get_model_url(model_name, 'model')
+            if model_url:
+                model_path = self.base_path / 'models' / 'Stable-diffusion' / f"{model_name}.safetensors"
+                model_path.parent.mkdir(parents=True, exist_ok=True)
                 
-                if success:
-                    successful_downloads += 1
-                    print(f"     ✅ Download successful")
-                else:
-                    failed_downloads += 1
-                    print(f"     ❌ Download failed")
-                    
-            except Exception as e:
-                failed_downloads += 1
-                print(f"     ❌ Download error: {e}")
+                if vdownload(model_url, model_path, f"Model: {model_name}"):
+                    success_count += 1
+            else:
+                vprint(f"❌ Could not find URL for model: {model_name}", VerbosityLevel.MINIMAL)
         
-        print(f"\n   📊 Download Summary:")
-        print(f"      - Total items: {len(download_queue)}")
-        print(f"      - Successful: {successful_downloads}")
-        print(f"      - Failed: {failed_downloads}")
+        # Download VAEs  
+        for i, vae_name in enumerate(selected_vaes, 1):
+            vprint(f"   [{i}/{len(selected_vaes)}] Processing VAE: {vae_name}", VerbosityLevel.NORMAL)
+            
+            vae_url = self.get_model_url(vae_name, 'vae')
+            if vae_url:
+                vae_path = self.base_path / 'models' / 'VAE' / f"{vae_name}.safetensors"
+                vae_path.parent.mkdir(parents=True, exist_ok=True)
+                
+                if vdownload(vae_url, vae_path, f"VAE: {vae_name}"):
+                    success_count += 1
+            else:
+                vprint(f"❌ Could not find URL for VAE: {vae_name}", VerbosityLevel.MINIMAL)
         
-        if failed_downloads > 0:
-            print(f"      ⚠️ {failed_downloads} downloads failed. Check the URLs and try again.")
+        # Download LoRAs
+        for i, lora_name in enumerate(selected_loras, 1):
+            vprint(f"   [{i}/{len(selected_loras)}] Processing LoRA: {lora_name}", VerbosityLevel.NORMAL)
+            
+            lora_url = self.get_model_url(lora_name, 'lora')
+            if lora_url:
+                lora_path = self.base_path / 'models' / 'Lora' / f"{lora_name}.safetensors"
+                lora_path.parent.mkdir(parents=True, exist_ok=True)
+                
+                if vdownload(lora_url, lora_path, f"LoRA: {lora_name}"):
+                    success_count += 1
+            else:
+                vprint(f"❌ Could not find URL for LoRA: {lora_name}", VerbosityLevel.MINIMAL)
+        
+        vprint(f"✅ Download completed: {success_count}/{total_downloads} successful", VerbosityLevel.NORMAL)
+        return success_count > 0
     
-except Exception as e:
-    print(f"   - ❌ ERROR during model download phase: {e}")
-    import traceback
-    print(f"   - Full error details: {traceback.format_exc()}")
+    def get_model_url(self, model_name, model_type):
+        """Get model URL from model data with verbose debugging"""
+        
+        vprint(f"🔍 Looking up URL for {model_type}: {model_name}", VerbosityLevel.VERBOSE)
+        
+        # Read model data
+        scripts_path = Path(os.environ.get('scr_path', '/content/LSDAI')) / 'scripts'
+        model_data_file = scripts_path / '_models_data.py'
+        
+        if not model_data_file.exists():
+            vprint(f"❌ Model data file not found: {model_data_file}", VerbosityLevel.DETAILED)
+            return None
+        
+        try:
+            # Execute model data file to get the data
+            local_vars = {}
+            with open(model_data_file) as f:
+                exec(f.read(), {}, local_vars)
+            
+            # Map data type to variable name
+            data_map = {
+                'model': 'model_list',
+                'vae': 'vae_list',
+                'lora': 'lora_list',
+                'cnet': 'controlnet_list'
+            }
+            
+            data_var = data_map.get(model_type)
+            if not data_var or data_var not in local_vars:
+                vprint(f"❌ No data found for type: {model_type}", VerbosityLevel.DETAILED)
+                return None
+            
+            model_data = local_vars[data_var]
+            
+            if model_name in model_data:
+                url = model_data[model_name]
+                vprint(f"✅ Found URL for {model_name}: {url}", VerbosityLevel.VERBOSE)
+                return url
+            else:
+                vprint(f"❌ Model {model_name} not found in {model_type} data", VerbosityLevel.DETAILED)
+                return None
+                
+        except Exception as e:
+            vprint(f"❌ Error reading model data: {e}", VerbosityLevel.DETAILED)
+            return None
 
-print("   - Model download step complete.")
+def main():
+    """Main execution function with verbose output"""
+    verbose_manager = get_verbose_manager()
+    
+    vprint("=" * 50, VerbosityLevel.NORMAL)
+    vprint("🔥 LSDAI Enhanced Downloader with Verbosity Control", VerbosityLevel.NORMAL)
+    vprint("=" * 50, VerbosityLevel.NORMAL)
+    
+    # Show current verbosity level
+    level_names = {
+        VerbosityLevel.SILENT: "Silent",
+        VerbosityLevel.MINIMAL: "Minimal",
+        VerbosityLevel.NORMAL: "Normal", 
+        VerbosityLevel.DETAILED: "Detailed",
+        VerbosityLevel.VERBOSE: "Verbose",
+        VerbosityLevel.RAW: "Raw Output"
+    }
+    current_level = level_names.get(verbose_manager.verbosity_level, "Unknown")
+    vprint(f"🔧 Current verbosity level: {current_level}", VerbosityLevel.MINIMAL)
+    
+    downloader = VerboseDownloadManager()
+    
+    # Execute download steps
+    steps = [
+        ("🐍 1. Setting up Virtual Environment", downloader.setup_venv),
+        ("🚀 2. Installing WebUI", lambda: downloader.install_webui('automatic1111')),
+        ("📥 3. Downloading Models and Assets", downloader.download_models)
+    ]
+    
+    for step_name, step_func in steps:
+        vprint(f"\n{step_name}...", VerbosityLevel.NORMAL)
+        
+        try:
+            with verbose_manager.capture_output() as captured:
+                success = step_func()
+                
+                if not success:
+                    vprint(f"❌ {step_name} failed", VerbosityLevel.MINIMAL)
+                    return False
+                    
+                vprint(f"✅ {step_name} completed successfully", VerbosityLevel.NORMAL)
+                
+        except Exception as e:
+            vprint(f"❌ {step_name} failed with error: {e}", VerbosityLevel.MINIMAL)
+            return False
+    
+    vprint("\n🎉 All download operations completed successfully!", VerbosityLevel.NORMAL)
+    return True
 
-print("\n" + "="*35)
-print("🎉 LSDAI Enhanced Download Complete!")
-print("   Please review the output above for any errors.")
-print("="*35)
+if __name__ == "__main__":
+    main()
