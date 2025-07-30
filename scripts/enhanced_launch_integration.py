@@ -1,14 +1,8 @@
-# ~ enhanced_launch_integration.py | Complete Launch System with Verbosity Integration ~
+# ~ enhanced_launch_integration.py | Robust Launch System with Fallback Support ~
 
 from modules.widget_factory import WidgetFactory
 from modules.webui_utils import update_current_webui
 from modules import json_utils as js
-
-# CRITICAL: Import verbosity system for complete integration
-from modules.verbose_output_manager import (
-    get_verbose_manager, VerbosityLevel, 
-    vprint, vrun
-)
 
 from IPython.display import display, Javascript, HTML
 import ipywidgets as widgets
@@ -21,6 +15,51 @@ import threading
 import time
 import signal
 import shlex
+
+# --- VERBOSITY SYSTEM IMPORT WITH FALLBACK ---
+try:
+    from modules.verbose_output_manager import (
+        get_verbose_manager, VerbosityLevel, 
+        vprint, vrun
+    )
+    VERBOSITY_AVAILABLE = True
+    verbose_manager = get_verbose_manager()
+    
+    def log_msg(message: str, level: int = 2):
+        """Verbosity-aware logging"""
+        vprint(message, level)
+        
+    def run_cmd(cmd, **kwargs):
+        """Verbosity-aware command execution"""
+        return vrun(cmd, **kwargs)
+        
+except ImportError:
+    print("⚠️ Verbosity system not available - using fallback logging")
+    VERBOSITY_AVAILABLE = False
+    
+    # Fallback verbosity levels
+    class VerbosityLevel:
+        SILENT = 0
+        MINIMAL = 1
+        NORMAL = 2
+        DETAILED = 3
+        VERBOSE = 4
+        RAW = 5
+    
+    def log_msg(message: str, level: int = 2):
+        """Fallback logging function"""
+        if level <= 2:  # Show NORMAL and below by default
+            print(message)
+    
+    def run_cmd(cmd, **kwargs):
+        """Fallback command execution"""
+        try:
+            result = subprocess.run(cmd, check=True, text=True, capture_output=True, **kwargs)
+            return result
+        except subprocess.CalledProcessError as e:
+            print(f"❌ Command failed: {' '.join(cmd)}")
+            print(f"Error: {e}")
+            raise
 
 # --- ROBUST PATH RESOLUTION ---
 def find_script_path():
@@ -67,7 +106,6 @@ class WebUIProcessManager:
         self.process = None
         self.monitor_thread = None
         self.running = False
-        self.verbose_manager = get_verbose_manager()
         self.webui_path = None
         self.public_url = None
         self.local_url = None
@@ -88,10 +126,10 @@ class WebUIProcessManager:
         
         for path in webui_paths:
             if path.exists() and (path / 'launch.py').exists():
-                vprint(f"✅ Found WebUI installation: {path}", VerbosityLevel.DETAILED)
+                log_msg(f"✅ Found WebUI installation: {path}", VerbosityLevel.DETAILED)
                 return path
                 
-        vprint("❌ No WebUI installation found", VerbosityLevel.MINIMAL)
+        log_msg("❌ No WebUI installation found", VerbosityLevel.MINIMAL)
         return None
     
     def build_launch_command(self, settings):
@@ -147,12 +185,8 @@ class WebUIProcessManager:
                 custom_list = shlex.split(custom_args)
                 cmd.extend(custom_list)
             except ValueError:
-                vprint(f"⚠️ Invalid custom arguments: {custom_args}", VerbosityLevel.MINIMAL)
+                log_msg(f"⚠️ Invalid custom arguments: {custom_args}", VerbosityLevel.MINIMAL)
                 
-        # Add verbosity flags based on current level
-        if self.verbose_manager.verbosity_level >= VerbosityLevel.VERBOSE:
-            cmd.append('--debug')
-            
         return cmd
     
     def start_webui(self, settings):
@@ -161,9 +195,9 @@ class WebUIProcessManager:
             # Build launch command
             cmd = self.build_launch_command(settings)
             
-            vprint("🚀 Starting WebUI process...", VerbosityLevel.NORMAL)
-            vprint(f"🔧 Working directory: {self.webui_path}", VerbosityLevel.DETAILED)
-            vprint(f"🔧 Command: {' '.join(cmd)}", VerbosityLevel.DETAILED)
+            log_msg("🚀 Starting WebUI process...", VerbosityLevel.NORMAL)
+            log_msg(f"🔧 Working directory: {self.webui_path}", VerbosityLevel.DETAILED)
+            log_msg(f"🔧 Command: {' '.join(cmd)}", VerbosityLevel.DETAILED)
             
             # Start process
             self.process = subprocess.Popen(
@@ -182,18 +216,18 @@ class WebUIProcessManager:
             self.monitor_thread.daemon = True
             self.monitor_thread.start()
             
-            vprint("✅ WebUI process started successfully", VerbosityLevel.NORMAL)
-            vprint(f"🔧 Process ID: {self.process.pid}", VerbosityLevel.DETAILED)
+            log_msg("✅ WebUI process started successfully", VerbosityLevel.NORMAL)
+            log_msg(f"🔧 Process ID: {self.process.pid}", VerbosityLevel.DETAILED)
             
             return True
             
         except Exception as e:
-            vprint(f"❌ Failed to start WebUI: {e}", VerbosityLevel.MINIMAL)
+            log_msg(f"❌ Failed to start WebUI: {e}", VerbosityLevel.MINIMAL)
             return False
     
     def _monitor_process(self):
         """Monitor WebUI process output and extract URLs"""
-        vprint("📊 Starting WebUI output monitoring...", VerbosityLevel.DETAILED)
+        log_msg("📊 Starting WebUI output monitoring...", VerbosityLevel.DETAILED)
         
         while self.running and self.process:
             try:
@@ -203,25 +237,31 @@ class WebUIProcessManager:
                     
                 line = line.strip()
                 if line:
-                    # Show output based on verbosity level
-                    if self.verbose_manager.verbosity_level >= VerbosityLevel.RAW:
-                        print(line)
-                    elif self.verbose_manager.verbosity_level >= VerbosityLevel.VERBOSE:
-                        # Show important lines
+                    # Show output based on verbosity level or fallback
+                    if VERBOSITY_AVAILABLE:
+                        if verbose_manager.verbosity_level >= VerbosityLevel.RAW:
+                            print(line)
+                        elif verbose_manager.verbosity_level >= VerbosityLevel.VERBOSE:
+                            # Show important lines
+                            if any(keyword in line.lower() for keyword in 
+                                   ['running on', 'local url', 'public url', 'model loaded', 'error', 'warning']):
+                                print(line)
+                    else:
+                        # Fallback: show important lines
                         if any(keyword in line.lower() for keyword in 
-                               ['running on', 'local url', 'public url', 'model loaded', 'error', 'warning']):
+                               ['running on', 'local url', 'public url', 'error', 'warning']):
                             print(line)
                     
                     # Extract URLs
                     if 'running on local url:' in line.lower():
                         self.local_url = line.split(':', 2)[-1].strip()
-                        vprint(f"🔗 Local URL: {self.local_url}", VerbosityLevel.NORMAL)
+                        log_msg(f"🔗 Local URL: {self.local_url}", VerbosityLevel.NORMAL)
                     elif 'running on public url:' in line.lower():
                         self.public_url = line.split(':', 2)[-1].strip()
-                        vprint(f"🌐 Public URL: {self.public_url}", VerbosityLevel.NORMAL)
+                        log_msg(f"🌐 Public URL: {self.public_url}", VerbosityLevel.NORMAL)
                         
             except Exception as e:
-                vprint(f"❌ Error monitoring process: {e}", VerbosityLevel.DETAILED)
+                log_msg(f"❌ Error monitoring process: {e}", VerbosityLevel.DETAILED)
                 break
                 
         # Process ended
@@ -229,19 +269,19 @@ class WebUIProcessManager:
             exit_code = self.process.poll()
             if exit_code is not None:
                 if exit_code == 0:
-                    vprint("✅ WebUI process ended normally", VerbosityLevel.NORMAL)
+                    log_msg("✅ WebUI process ended normally", VerbosityLevel.NORMAL)
                 else:
-                    vprint(f"❌ WebUI process ended with error code: {exit_code}", VerbosityLevel.MINIMAL)
+                    log_msg(f"❌ WebUI process ended with error code: {exit_code}", VerbosityLevel.MINIMAL)
         
         self.running = False
     
     def stop_webui(self):
         """Stop WebUI process"""
         if not self.process or not self.running:
-            vprint("⚠️ No WebUI process running", VerbosityLevel.NORMAL)
+            log_msg("⚠️ No WebUI process running", VerbosityLevel.NORMAL)
             return True
             
-        vprint("⏹️ Stopping WebUI process...", VerbosityLevel.NORMAL)
+        log_msg("⏹️ Stopping WebUI process...", VerbosityLevel.NORMAL)
         
         try:
             # Graceful termination
@@ -251,13 +291,13 @@ class WebUIProcessManager:
             # Wait for termination
             try:
                 self.process.wait(timeout=10)
-                vprint("✅ WebUI stopped gracefully", VerbosityLevel.NORMAL)
+                log_msg("✅ WebUI stopped gracefully", VerbosityLevel.NORMAL)
             except subprocess.TimeoutExpired:
                 # Force kill if necessary
-                vprint("🔨 Force killing WebUI process...", VerbosityLevel.DETAILED)
+                log_msg("🔨 Force killing WebUI process...", VerbosityLevel.DETAILED)
                 self.process.kill()
                 self.process.wait()
-                vprint("✅ WebUI process killed", VerbosityLevel.NORMAL)
+                log_msg("✅ WebUI process killed", VerbosityLevel.NORMAL)
                 
             self.process = None
             self.local_url = None
@@ -266,12 +306,12 @@ class WebUIProcessManager:
             return True
             
         except Exception as e:
-            vprint(f"❌ Error stopping WebUI: {e}", VerbosityLevel.MINIMAL)
+            log_msg(f"❌ Error stopping WebUI: {e}", VerbosityLevel.MINIMAL)
             return False
     
     def restart_webui(self, settings):
         """Restart WebUI process"""
-        vprint("🔄 Restarting WebUI...", VerbosityLevel.NORMAL)
+        log_msg("🔄 Restarting WebUI...", VerbosityLevel.NORMAL)
         
         # Stop current process
         if not self.stop_webui():
@@ -301,7 +341,6 @@ class LaunchWidgetManager:
         self.widgets = {}
         self.selection_containers = {}
         self.webui_manager = WebUIProcessManager()
-        self.verbose_manager = get_verbose_manager()
         
         # Define widget keys for settings persistence
         self.settings_keys = [
@@ -335,12 +374,12 @@ class LaunchWidgetManager:
             
             return data_map.get(data_type, {})
         except Exception as e:
-            vprint(f"Error reading model data: {e}", VerbosityLevel.DETAILED)
+            log_msg(f"Error reading model data: {e}", VerbosityLevel.DETAILED)
             return {}
 
     def build_ui(self):
         """Build complete launch interface."""
-        vprint("🎨 Building enhanced launch interface...", VerbosityLevel.DETAILED)
+        log_msg("🎨 Building enhanced launch interface...", VerbosityLevel.DETAILED)
         
         # --- HEADER CONTROLS ---
         self.widgets['auto_launch'] = widgets.ToggleButton(value=False, description='Auto Launch', button_style='')
@@ -360,7 +399,7 @@ class LaunchWidgetManager:
         self.widgets['monitor_performance'] = widgets.ToggleButton(value=True, description='Monitor Performance', button_style='')
         self.widgets['auto_restart'] = widgets.ToggleButton(value=False, description='Auto Restart on Crash', button_style='')
         
-        # FIXED: Use proper widget attribute access
+        # FIXED: Use proper widget attribute access with checkbox factory method
         self.widgets['backup_before_launch'] = self.factory.create_checkbox(
             value=True,
             description='Backup Settings Before Launch'
@@ -519,8 +558,8 @@ class LaunchWidgetManager:
         return self.factory.create_hbox([main_content, sidebar], class_names=['main-ui-container'])
 
     def setup_callbacks(self):
-        """Connect widget events to their handler functions with verbosity integration."""
-        vprint("🔧 Setting up widget callbacks...", VerbosityLevel.DETAILED)
+        """Connect widget events to their handler functions."""
+        log_msg("🔧 Setting up widget callbacks...", VerbosityLevel.DETAILED)
         
         # Auto-load settings
         self.load_settings()
@@ -529,13 +568,13 @@ class LaunchWidgetManager:
         if hasattr(self.widgets, 'monitor_performance') and self.widgets['monitor_performance'].value:
             self.start_performance_monitoring()
             
-        vprint("✅ Widget callbacks configured", VerbosityLevel.DETAILED)
+        log_msg("✅ Widget callbacks configured", VerbosityLevel.DETAILED)
 
     # --- CORE LAUNCH FUNCTIONALITY ---
     def launch_webui(self, button):
         """Launch WebUI with complete process management and monitoring."""
         try:
-            vprint("🚀 Initiating WebUI launch sequence...", VerbosityLevel.NORMAL)
+            log_msg("🚀 Initiating WebUI launch sequence...", VerbosityLevel.NORMAL)
             
             # Update status
             self.status_display.value = '<div class="status-display starting">🚀 Starting WebUI...</div>'
@@ -543,7 +582,7 @@ class LaunchWidgetManager:
             # Backup settings if requested
             # FIXED: Use .value instead of .get() for widget access
             if hasattr(self.widgets['backup_before_launch'], 'value') and self.widgets['backup_before_launch'].value:
-                vprint("💾 Backing up settings before launch...", VerbosityLevel.DETAILED)
+                log_msg("💾 Backing up settings before launch...", VerbosityLevel.DETAILED)
                 self.save_settings()
             
             # Load current settings
@@ -574,7 +613,7 @@ class LaunchWidgetManager:
                 self.show_notification("Failed to start WebUI. Check console for details.", "error")
                 
         except Exception as e:
-            vprint(f"❌ Launch failed: {e}", VerbosityLevel.MINIMAL)
+            log_msg(f"❌ Launch failed: {e}", VerbosityLevel.MINIMAL)
             self.show_notification(f"Launch failed: {e}", "error")
             self.status_display.value = '<div class="status-display error">❌ Launch Failed</div>'
 
@@ -598,275 +637,4 @@ class LaunchWidgetManager:
                     status_html = f'''
                     <div class="status-display running">
                         ✅ WebUI Running<br>
-                        🔗 <a href="{self.webui_manager.local_url}" target="_blank">Local URL</a>
-                    '''
-                    
-                    if self.webui_manager.public_url:
-                        status_html += f'<br>🌐 <a href="{self.webui_manager.public_url}" target="_blank">Public URL</a>'
-                    
-                    status_html += '</div>'
-                    self.status_display.value = status_html
-                    
-                    self.show_notification("WebUI launched successfully!", "success")
-                    
-                    # Start performance monitoring if enabled
-                    if hasattr(self.widgets['monitor_performance'], 'value') and self.widgets['monitor_performance'].value:
-                        self.start_performance_monitoring()
-                    
-                    return
-                
-                time.sleep(2)
-                waited += 2
-            
-            # Timeout
-            if waited >= max_wait:
-                self.status_display.value = '<div class="status-display warning">⚠️ WebUI startup timeout</div>'
-                self.show_notification("WebUI startup took longer than expected", "warning")
-        
-        # Run check in background thread
-        check_thread = threading.Thread(target=check_ready)
-        check_thread.daemon = True
-        check_thread.start()
-
-    def stop_webui(self, button):
-        """Stop the running WebUI."""
-        try:
-            vprint("⏹️ Stopping WebUI...", VerbosityLevel.NORMAL)
-            self.status_display.value = '<div class="status-display stopping">⏹️ Stopping WebUI...</div>'
-            
-            success = self.webui_manager.stop_webui()
-            
-            if success:
-                self.status_display.value = '<div class="status-display stopped">⏹️ WebUI Stopped</div>'
-                self.show_notification("WebUI stopped successfully!", "success")
-            else:
-                self.status_display.value = '<div class="status-display error">❌ Stop Failed</div>'
-                self.show_notification("Failed to stop WebUI", "error")
-                
-        except Exception as e:
-            vprint(f"❌ Stop failed: {e}", VerbosityLevel.MINIMAL)
-            self.show_notification(f"Stop failed: {e}", "error")
-
-    def restart_webui(self, button):
-        """Restart the WebUI."""
-        try:
-            vprint("🔄 Restarting WebUI...", VerbosityLevel.NORMAL)
-            self.status_display.value = '<div class="status-display restarting">🔄 Restarting WebUI...</div>'
-            
-            # Load current settings
-            settings = js.load_settings()
-            if not settings:
-                settings = {'LAUNCH': {}}
-            
-            success = self.webui_manager.restart_webui(settings)
-            
-            if success:
-                self.show_notification("WebUI restarted successfully!", "success")
-                self.wait_for_webui_ready()
-            else:
-                self.status_display.value = '<div class="status-display error">❌ Restart Failed</div>'
-                self.show_notification("Failed to restart WebUI", "error")
-                
-        except Exception as e:
-            vprint(f"❌ Restart failed: {e}", VerbosityLevel.MINIMAL)
-            self.show_notification(f"Restart failed: {e}", "error")
-
-    def quick_launch(self, button):
-        """Quick launch with default optimized settings."""
-        try:
-            vprint("⚡ Quick launching with optimized settings...", VerbosityLevel.NORMAL)
-            
-            # Set optimal defaults
-            if 'optimize_system' in self.widgets:
-                self.widgets['optimize_system'].value = True
-            if 'public_link' in self.widgets:
-                self.widgets['public_link'].value = True
-            if 'monitor_performance' in self.widgets:
-                self.widgets['monitor_performance'].value = True
-            
-            self.show_notification("Quick launching with optimized settings...", "info")
-            self.launch_webui(button)
-            
-        except Exception as e:
-            vprint(f"❌ Quick launch failed: {e}", VerbosityLevel.MINIMAL)
-            self.show_notification(f"Quick launch failed: {e}", "error")
-
-    def start_performance_monitoring(self):
-        """Start performance monitoring display"""
-        def monitor_performance():
-            while self.webui_manager.running:
-                try:
-                    import psutil
-                    
-                    # Get system stats
-                    cpu_percent = psutil.cpu_percent(interval=1)
-                    memory = psutil.virtual_memory()
-                    
-                    # GPU stats if available
-                    gpu_info = "N/A"
-                    try:
-                        import GPUtil
-                        gpus = GPUtil.getGPUs()
-                        if gpus:
-                            gpu = gpus[0]
-                            gpu_info = f"{gpu.load*100:.1f}% ({gpu.memoryUsed}MB/{gpu.memoryTotal}MB)"
-                    except:
-                        pass
-                    
-                    # Update performance display
-                    with self.performance_monitor:
-                        perf_html = f"""
-                        <div style="font-family: monospace; font-size: 12px; background: #f0f0f0; padding: 10px; border-radius: 5px;">
-                            <strong>🖥️ System Performance</strong><br>
-                            CPU: {cpu_percent:.1f}% | RAM: {memory.percent:.1f}% ({memory.used//1024//1024}MB/{memory.total//1024//1024}MB)<br>
-                            GPU: {gpu_info}<br>
-                            WebUI Status: {self.webui_manager.get_status().title()}
-                        </div>
-                        """
-                        self.performance_monitor.clear_output(wait=True)
-                        display(HTML(perf_html))
-                    
-                    time.sleep(5)
-                    
-                except Exception as e:
-                    vprint(f"Performance monitoring error: {e}", VerbosityLevel.VERBOSE)
-                    break
-        
-        monitor_thread = threading.Thread(target=monitor_performance)
-        monitor_thread.daemon = True
-        monitor_thread.start()
-
-    def open_settings(self, button):
-        """Open settings management interface."""
-        self.show_notification("Settings interface coming soon!", "info")
-
-    def view_logs(self, button):
-        """Open log viewer interface."""
-        self.show_notification("Log viewer coming soon!", "info")
-
-    def save_settings(self):
-        """Save all widget data to settings."""
-        try:
-            data = {}
-            
-            # Add all widget values using proper attribute access
-            for key in self.settings_keys:
-                if key in self.widgets:
-                    widget = self.widgets[key]
-                    if hasattr(widget, 'value'):
-                        data[key] = widget.value
-            
-            # Save to settings
-            js.save_settings(data, section='LAUNCH')
-            vprint("💾 Launch settings saved", VerbosityLevel.DETAILED)
-            
-        except Exception as e:
-            vprint(f"❌ Error saving launch settings: {e}", VerbosityLevel.MINIMAL)
-
-    def load_settings(self):
-        """Load settings from file."""
-        try:
-            settings = js.load_settings(section='LAUNCH')
-            if settings:
-                self.apply_settings(settings)
-                vprint("📂 Launch settings loaded", VerbosityLevel.DETAILED)
-        except Exception as e:
-            vprint(f"❌ Error loading launch settings: {e}", VerbosityLevel.DETAILED)
-
-    def apply_settings(self, settings):
-        """Apply loaded settings to widgets."""
-        # Apply to widgets using proper attribute access
-        for key in self.settings_keys:
-            if key in settings and key in self.widgets:
-                try:
-                    if hasattr(self.widgets[key], 'value'):
-                        self.widgets[key].value = settings[key]
-                except Exception as e:
-                    vprint(f"Warning: Could not apply setting {key}: {e}", VerbosityLevel.VERBOSE)
-
-    def show_notification(self, message, type_="info"):
-        """Show a notification popup."""
-        if hasattr(self, 'notification_popup') and self.notification_popup:
-            icons = {'success': '✅', 'error': '❌', 'warning': '⚠️', 'info': 'ℹ️'}
-            icon = icons.get(type_, 'ℹ️')
-            
-            self.notification_popup.value = f'''
-                <div class="notification {type_}" style="
-                    background: {'#d4edda' if type_=='success' else '#f8d7da' if type_=='error' else '#fff3cd' if type_=='warning' else '#d1ecf1'};
-                    border: 1px solid {'#c3e6cb' if type_=='success' else '#f5c6cb' if type_=='error' else '#faeeba' if type_=='warning' else '#bee5eb'};
-                    color: {'#155724' if type_=='success' else '#721c24' if type_=='error' else '#856404' if type_=='warning' else '#0c5460'};
-                    padding: 10px;
-                    border-radius: 5px;
-                    margin: 5px 0;
-                ">
-                    <span class="icon">{icon}</span> {message}
-                </div>
-            '''
-            
-            # Auto-hide after 5 seconds for non-error messages
-            if type_ != 'error':
-                def hide_notification():
-                    time.sleep(5)
-                    self.notification_popup.value = ''
-                
-                hide_thread = threading.Thread(target=hide_notification)
-                hide_thread.daemon = True
-                hide_thread.start()
-
-# --- EXECUTION ---
-if __name__ == "__main__":
-    # Initialize verbosity system
-    verbose_manager = get_verbose_manager()
-    
-    vprint("=" * 60, VerbosityLevel.NORMAL)
-    vprint("🔥 LSDAI Enhanced Launch System with Full Verbosity Integration", VerbosityLevel.NORMAL)
-    vprint("=" * 60, VerbosityLevel.NORMAL)
-    
-    # Show current verbosity level
-    level_names = {
-        VerbosityLevel.SILENT: "Silent",
-        VerbosityLevel.MINIMAL: "Minimal",
-        VerbosityLevel.NORMAL: "Normal", 
-        VerbosityLevel.DETAILED: "Detailed",
-        VerbosityLevel.VERBOSE: "Verbose",
-        VerbosityLevel.RAW: "Raw Output"
-    }
-    current_level = level_names.get(verbose_manager.verbosity_level, "Unknown")
-    vprint(f"🔧 Current verbosity level: {current_level}", VerbosityLevel.MINIMAL)
-    
-    # Load CSS and JS if available
-    try:
-        WidgetFactory().load_css(CSS / 'enhanced-widgets.css')
-        vprint("🎨 Enhanced CSS loaded", VerbosityLevel.DETAILED)
-    except:
-        vprint("⚠️ Enhanced CSS not found, using default styles", VerbosityLevel.DETAILED)
-        
-    if IN_COLAB:
-        try:
-            WidgetFactory().load_js(JS / 'main-widgets.js')
-            vprint("📜 Enhanced JavaScript loaded", VerbosityLevel.DETAILED)
-        except:
-            vprint("⚠️ Enhanced JavaScript not found", VerbosityLevel.DETAILED)
-
-    # Create and display the launch interface
-    manager = LaunchWidgetManager()
-    main_container = manager.build_ui()
-    
-    vprint("🎨 Launch interface created successfully", VerbosityLevel.NORMAL)
-    
-    display(main_container)
-    
-    # Setup callbacks after display
-    manager.setup_callbacks()
-    
-    vprint("✅ Enhanced Launch System ready!", VerbosityLevel.NORMAL)
-    vprint("   Use the buttons above to launch, stop, or restart your WebUI", VerbosityLevel.NORMAL)
-    
-    # If auto-launch is enabled, start immediately
-    try:
-        settings = js.load_settings(section='LAUNCH')
-        if settings and settings.get('auto_launch', False):
-            vprint("🚀 Auto-launch enabled, starting WebUI...", VerbosityLevel.NORMAL)
-            manager.launch_webui(None)
-    except:
-        pass  # Auto-launch failed, ignore
+                        🔗 <a href="{self
