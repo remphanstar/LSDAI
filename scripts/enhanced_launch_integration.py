@@ -328,15 +328,15 @@ class WebUIProcessManager:
             log_msg(f"❌ Error stopping WebUI: {e}", VerbosityLevel.MINIMAL)
             return False
 
-# --- LAUNCH WIDGET MANAGER (FIXED) ---
+# --- LAUNCH WIDGET MANAGER (STYLED TO MATCH EXISTING SYSTEM) ---
 class LaunchWidgetManager:
-    """Manages the launch interface with working buttons"""
+    """Manages the launch interface with consistent styling"""
     
     def __init__(self, state):
+        self.factory = WidgetFactory()
         self.state = state
         self.widgets = {}
         
-        # Use direct ipywidgets instead of factory for critical components
         self.settings_keys = [
             'auto_launch', 'public_link', 'optimize_system',
             'low_memory_mode', 'precision_mode', 'custom_args',
@@ -344,106 +344,125 @@ class LaunchWidgetManager:
         ]
 
     def build_ui(self):
-        """Build launch interface with working buttons"""
+        """Build launch interface matching existing widget styling"""
         log_msg("🎨 Building launch interface...", VerbosityLevel.DETAILED)
         
-        # --- CONTROLS (Direct ipywidgets) ---
+        # --- LAUNCH SETTINGS (Match existing toggle button style) ---
         self.widgets['auto_launch'] = widgets.ToggleButton(
             value=False, 
             description='Auto Launch', 
-            button_style=''
+            button_style='',
+            tooltip='Automatically launch WebUI after setup'
         )
         self.widgets['public_link'] = widgets.ToggleButton(
             value=True, 
             description='Public Link', 
-            button_style=''
+            button_style='',
+            tooltip='Create public Gradio link for external access'
         )
         self.widgets['optimize_system'] = widgets.ToggleButton(
             value=True, 
             description='Optimize System', 
-            button_style=''
+            button_style='',
+            tooltip='Apply system optimizations (xformers, etc.)'
         )
         self.widgets['low_memory_mode'] = widgets.ToggleButton(
             value=False, 
             description='Low Memory Mode', 
-            button_style=''
+            button_style='',
+            tooltip='Enable low RAM/VRAM optimizations'
         )
         
-        self.widgets['precision_mode'] = widgets.Dropdown(
+        # Precision dropdown (match existing dropdown style)
+        self.widgets['precision_mode'] = self.factory.create_dropdown(
             options=['auto', 'fp16', 'fp32', 'bf16'],
             value='auto',
             description='Precision:'
         )
         
-        self.widgets['backup_before_launch'] = widgets.Checkbox(
+        # Backup checkbox
+        self.widgets['backup_before_launch'] = self.factory.create_checkbox(
             value=True,
             description='Backup Settings Before Launch'
         )
         
-        self.widgets['custom_args'] = widgets.Textarea(
+        # Custom arguments textarea
+        self.widgets['custom_args'] = self.factory.create_textarea(
             value='',
             description='Custom Arguments:',
             placeholder='Additional command line arguments...',
-            layout=widgets.Layout(width='100%', height='80px')
+            rows=3
         )
         
-        # Layout controls
-        controls_left = widgets.VBox([
+        # --- LAYOUT SECTIONS (Match existing header-group style) ---
+        left_toggles = self.factory.create_hbox([
             self.widgets['auto_launch'],
-            self.widgets['public_link'],
-            self.widgets['optimize_system']
-        ])
+            self.widgets['public_link']
+        ], class_names=['header-group'])
         
-        controls_right = widgets.VBox([
-            self.widgets['low_memory_mode'],
-            self.widgets['precision_mode']
-        ])
+        right_toggles = self.factory.create_hbox([
+            self.widgets['optimize_system'],
+            self.widgets['low_memory_mode']
+        ], class_names=['header-group'])
         
-        controls_row = widgets.HBox([controls_left, controls_right])
+        # Main controls row
+        controls_row = self.factory.create_hbox([
+            left_toggles,
+            self.widgets['precision_mode'],
+            right_toggles
+        ], class_names=['header-controls'])
         
-        # Configuration section
-        config_section = widgets.VBox([
+        # Configuration section  
+        config_section = self.factory.create_vbox([
             self.widgets['backup_before_launch'],
             self.widgets['custom_args']
         ])
         
-        # --- BUTTONS (Direct ipywidgets with proper callbacks) ---
-        self.launch_button = widgets.Button(
-            description='🚀 Launch WebUI',
+        # --- ACTION BUTTONS (Match existing button styling) ---
+        self.launch_button = self.factory.create_button(
+            '🚀 Launch WebUI',
             button_style='success',
-            layout=widgets.Layout(width='auto', margin='5px')
+            class_names=['enhanced-button', 'button-success']
         )
         self.launch_button.on_click(self._on_launch_click)
         
-        self.stop_button = widgets.Button(
-            description='⏹️ Stop WebUI',
-            button_style='danger',
-            layout=widgets.Layout(width='auto', margin='5px')
+        self.stop_button = self.factory.create_button(
+            '⏹️ Stop WebUI',
+            button_style='danger', 
+            class_names=['enhanced-button', 'button-error']
         )
         self.stop_button.on_click(self._on_stop_click)
         
-        self.restart_button = widgets.Button(
-            description='🔄 Restart WebUI',
+        self.restart_button = self.factory.create_button(
+            '🔄 Restart WebUI',
             button_style='warning',
-            layout=widgets.Layout(width='auto', margin='5px')
+            class_names=['enhanced-button', 'button-warning']
         )
         self.restart_button.on_click(self._on_restart_click)
         
-        button_row = widgets.HBox([self.launch_button, self.stop_button, self.restart_button])
+        # Button row (match existing layout)
+        button_row = self.factory.create_hbox([
+            self.launch_button, 
+            self.stop_button, 
+            self.restart_button
+        ], class_names=['header-group'])
         
         # --- STATUS DISPLAY ---
-        self.status_display = widgets.HTML('<div>⏳ Ready to launch...</div>')
+        self.status_display = self.factory.create_html(
+            '<div style="text-align: center; padding: 10px; font-weight: bold;">⏳ Ready to launch...</div>'
+        )
         
         # Connect status display to global state
         self.state.status_widget = self.status_display
         
-        # --- FINAL LAYOUT ---
-        main_content = widgets.VBox([
+        # --- FINAL LAYOUT (Match existing structure) ---
+        main_content = self.factory.create_vbox([
+            self.factory.create_html('<h3 style="text-align: center; margin: 10px 0;">🚀 WebUI Launch Control</h3>'),
             controls_row,
             config_section,
             button_row,
             self.status_display
-        ], layout=widgets.Layout(padding='10px'))
+        ], class_names=['main-content'])
         
         return main_content
 
@@ -555,7 +574,7 @@ def main():
     
     # Check verbosity system
     if VERBOSITY_AVAILABLE:
-        print(f"🔧 Verbosity system: Available (Level: {verbose_manager.get_level_name()})")
+        print(f"🔧 Verbosity system: Available (Level: {verbose_manager.get_current_level_name()})")
     else:
         print("🔧 Verbosity system: Using fallback")
     
