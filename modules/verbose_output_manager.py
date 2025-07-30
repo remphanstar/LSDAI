@@ -1,4 +1,4 @@
-# ~ verbose_output_manager.py | Complete Verbosity Control System for LSDAI ~
+# ~ verbose_output_manager.py | Complete Verbosity Control System for LSDAI - FIXED ~
 
 import os
 import sys
@@ -30,8 +30,28 @@ class VerboseOutputManager:
         self.output_buffer = []
         self.real_time_display = True
         
+        # Level name mapping
+        self.level_names = {
+            VerbosityLevel.SILENT: "Silent",
+            VerbosityLevel.MINIMAL: "Minimal", 
+            VerbosityLevel.NORMAL: "Normal",
+            VerbosityLevel.DETAILED: "Detailed",
+            VerbosityLevel.VERBOSE: "Verbose",
+            VerbosityLevel.RAW: "Raw Output"
+        }
+        
         # Load verbosity setting from settings.json
         self.load_verbosity_setting()
+    
+    def get_level_name(self, level: Optional[int] = None) -> str:
+        """Get the name of the current or specified verbosity level"""
+        if level is None:
+            level = self.verbosity_level
+        return self.level_names.get(level, "Unknown")
+    
+    def get_current_level_name(self) -> str:
+        """Get the name of the current verbosity level"""
+        return self.get_level_name(self.verbosity_level)
     
     def load_verbosity_setting(self):
         """Load verbosity setting from settings.json"""
@@ -40,6 +60,13 @@ class VerboseOutputManager:
                 with open(self.settings_path, 'r') as f:
                     settings = json.load(f)
                 
+                # Check for explicit verbosity level first
+                explicit_level = settings.get('WIDGETS', {}).get('verbosity_level')
+                if explicit_level is not None:
+                    self.verbosity_level = int(explicit_level)
+                    return
+                
+                # Fall back to detailed_download boolean
                 verbosity = settings.get('WIDGETS', {}).get('detailed_download', False)
                 if verbosity:
                     self.verbosity_level = VerbosityLevel.RAW
@@ -62,7 +89,7 @@ class VerboseOutputManager:
             if 'WIDGETS' not in settings:
                 settings['WIDGETS'] = {}
             
-            # Map verbosity levels to detailed_download boolean
+            # Map verbosity levels to detailed_download boolean for backwards compatibility
             settings['WIDGETS']['detailed_download'] = (level >= VerbosityLevel.DETAILED)
             
             # Also save the exact level for internal use
@@ -85,16 +112,7 @@ class VerboseOutputManager:
         self.verbosity_level = level
         
         # Notify about the change
-        level_names = {
-            VerbosityLevel.SILENT: "Silent",
-            VerbosityLevel.MINIMAL: "Minimal", 
-            VerbosityLevel.NORMAL: "Normal",
-            VerbosityLevel.DETAILED: "Detailed",
-            VerbosityLevel.VERBOSE: "Verbose",
-            VerbosityLevel.RAW: "Raw Output"
-        }
-        
-        level_name = level_names.get(level, "Unknown")
+        level_name = self.get_level_name(level)
         print(f"🔧 Verbosity level set to: {level_name}")
     
     def should_show(self, required_level: int) -> bool:
@@ -113,6 +131,13 @@ class VerboseOutputManager:
         if show_output is None:
             show_output = self.should_show(VerbosityLevel.DETAILED)
         
+        # Show command if detailed level or higher
+        if self.should_show(VerbosityLevel.DETAILED):
+            cmd_str = ' '.join(str(c) for c in cmd)
+            print(f"🔧 Running command: {cmd_str}")
+            if cwd:
+                print(f"   Working directory: {cwd}")
+        
         # Determine output handling based on verbosity
         if self.verbosity_level >= VerbosityLevel.RAW:
             # Raw mode - show everything in real time
@@ -123,101 +148,65 @@ class VerboseOutputManager:
             stdout = subprocess.PIPE
             stderr = subprocess.STDOUT
         elif self.verbosity_level >= VerbosityLevel.DETAILED:
-            # Detailed mode - capture for conditional display
+            # Detailed mode - capture key output
+            stdout = subprocess.PIPE
+            stderr = subprocess.STDOUT
+        else:
+            # Normal/Minimal/Silent - capture everything
             stdout = subprocess.PIPE
             stderr = subprocess.PIPE
-        else:
-            # Normal/minimal mode - suppress output
-            stdout = subprocess.DEVNULL
-            stderr = subprocess.DEVNULL
-        
-        # Show command being executed if verbose enough
-        if self.should_show(VerbosityLevel.DETAILED):
-            cmd_str = ' '.join(str(c) for c in cmd)
-            print(f"🔧 Executing: {cmd_str}")
-            if cwd:
-                print(f"   Working directory: {cwd}")
         
         try:
-            # Run the process
-            if self.verbosity_level >= VerbosityLevel.RAW:
-                # Raw mode - direct execution with real-time output
-                result = subprocess.run(cmd, cwd=cwd, check=True, **kwargs)
+            if cwd:
+                result = subprocess.run(cmd, cwd=cwd, stdout=stdout, stderr=stderr, 
+                                      text=True, check=True, **kwargs)
             else:
-                # Captured output modes
-                result = subprocess.run(
-                    cmd, cwd=cwd, stdout=stdout, stderr=stderr, 
-                    text=True, check=True, **kwargs
-                )
-                
-                # Handle captured output
-                if hasattr(result, 'stdout') and result.stdout:
-                    if self.should_show(VerbosityLevel.VERBOSE):
-                        print("📤 Command output:")
-                        print(result.stdout)
-                    elif self.should_show(VerbosityLevel.DETAILED):
-                        # Show abbreviated output
-                        lines = result.stdout.strip().split('\n')
-                        if len(lines) > 10:
-                            print("📤 Command output (abbreviated):")
-                            print('\n'.join(lines[:5]))
-                            print(f"   ... ({len(lines) - 10} lines omitted) ...")
-                            print('\n'.join(lines[-5:]))
-                        else:
-                            print("📤 Command output:")
-                            print(result.stdout)
-                
-                if hasattr(result, 'stderr') and result.stderr:
-                    if self.should_show(VerbosityLevel.DETAILED):
-                        print("❌ Command errors:")
-                        print(result.stderr)
+                result = subprocess.run(cmd, stdout=stdout, stderr=stderr, 
+                                      text=True, check=True, **kwargs)
             
-            if self.should_show(VerbosityLevel.DETAILED):
-                print(f"✅ Command completed successfully (exit code: {result.returncode})")
+            # Handle captured output
+            if result.stdout and self.should_show(VerbosityLevel.VERBOSE):
+                print(result.stdout)
             
             return result
             
         except subprocess.CalledProcessError as e:
-            # Always show errors regardless of verbosity
+            # Always show errors regardless of verbosity level
             print(f"❌ Command failed with exit code {e.returncode}")
-            print(f"   Command: {' '.join(str(c) for c in cmd)}")
-            
-            if hasattr(e, 'stdout') and e.stdout:
-                print("📤 stdout:")
-                print(e.stdout)
-            if hasattr(e, 'stderr') and e.stderr:
-                print("📤 stderr:")
-                print(e.stderr)
-            
+            if e.stdout and self.should_show(VerbosityLevel.MINIMAL):
+                print(f"Output: {e.stdout}")
+            if e.stderr and self.should_show(VerbosityLevel.MINIMAL):
+                print(f"Error: {e.stderr}")
             raise
     
-    def run_pip_install(self, packages: List[str], **kwargs) -> bool:
+    def run_pip_install(self, packages: List[str], upgrade: bool = False, 
+                       force_reinstall: bool = False, **kwargs) -> bool:
         """Run pip install with verbosity-aware output"""
         
-        if isinstance(packages, str):
-            packages = [packages]
+        pip_cmd = [sys.executable, "-m", "pip", "install"]
         
-        pip_cmd = [sys.executable, "-m", "pip", "install"] + packages
-        
-        # Add verbosity flags to pip based on our verbosity level
-        if self.verbosity_level >= VerbosityLevel.RAW:
-            pip_cmd.extend(["-v", "-v", "-v"])  # Maximum pip verbosity
+        # Add verbosity flags based on current level
+        if self.verbosity_level <= VerbosityLevel.MINIMAL:
+            pip_cmd.append("-q")  # Quiet mode
         elif self.verbosity_level >= VerbosityLevel.VERBOSE:
-            pip_cmd.extend(["-v", "-v"])        # High pip verbosity  
-        elif self.verbosity_level >= VerbosityLevel.DETAILED:
-            pip_cmd.append("-v")                # Basic pip verbosity
-        elif self.verbosity_level <= VerbosityLevel.MINIMAL:
-            pip_cmd.append("-q")                # Quiet pip
+            pip_cmd.append("-v")  # Verbose mode
+        
+        if upgrade:
+            pip_cmd.append("--upgrade")
+        if force_reinstall:
+            pip_cmd.append("--force-reinstall")
+        
+        pip_cmd.extend(packages)
+        
+        if self.should_show(VerbosityLevel.NORMAL):
+            package_list = ', '.join(packages)
+            print(f"📦 Installing packages: {package_list}")
         
         try:
-            if self.should_show(VerbosityLevel.NORMAL):
-                packages_str = ', '.join(packages)
-                print(f"📦 Installing packages: {packages_str}")
-            
             self.run_subprocess(pip_cmd, **kwargs)
             
             if self.should_show(VerbosityLevel.NORMAL):
-                print(f"✅ Successfully installed: {', '.join(packages)}")
+                print(f"✅ Packages installed successfully")
             
             return True
             
@@ -229,7 +218,7 @@ class VerboseOutputManager:
         """Download file with verbosity-aware progress display"""
         
         if description is None:
-            description = destination.name
+            description = f"file to {destination.name}"
         
         if self.should_show(VerbosityLevel.NORMAL):
             print(f"📥 Downloading {description}...")
@@ -259,39 +248,6 @@ class VerboseOutputManager:
         except subprocess.CalledProcessError:
             print(f"❌ Failed to download {description}")
             return False
-    
-    @contextmanager
-    def capture_output(self):
-        """Context manager to capture all output during operations"""
-        if self.verbosity_level < VerbosityLevel.RAW:
-            # Only capture if not in raw mode
-            captured_output = []
-            
-            class OutputCapture:
-                def write(self, text):
-                    captured_output.append(text)
-                    if verbose_manager.should_show(VerbosityLevel.VERBOSE):
-                        verbose_manager.original_stdout.write(text)
-                
-                def flush(self):
-                    if hasattr(verbose_manager.original_stdout, 'flush'):
-                        verbose_manager.original_stdout.flush()
-            
-            old_stdout = sys.stdout
-            old_stderr = sys.stderr
-            
-            capture = OutputCapture()
-            sys.stdout = capture
-            sys.stderr = capture
-            
-            try:
-                yield captured_output
-            finally:
-                sys.stdout = old_stdout
-                sys.stderr = old_stderr
-        else:
-            # Raw mode - no capture
-            yield []
     
     def git_clone(self, repo_url: str, destination: Path, branch: str = None) -> bool:
         """Git clone with verbosity-aware output"""
@@ -326,6 +282,39 @@ class VerboseOutputManager:
         except subprocess.CalledProcessError:
             print(f"❌ Failed to clone repository: {repo_url}")
             return False
+
+    @contextmanager
+    def capture_output(self):
+        """Context manager to capture all output during operations"""
+        if self.verbosity_level < VerbosityLevel.RAW:
+            # Only capture if not in raw mode
+            captured_output = []
+            
+            class OutputCapture:
+                def write(self, text):
+                    captured_output.append(text)
+                    if verbose_manager.should_show(VerbosityLevel.VERBOSE):
+                        verbose_manager.original_stdout.write(text)
+                
+                def flush(self):
+                    if hasattr(verbose_manager.original_stdout, 'flush'):
+                        verbose_manager.original_stdout.flush()
+            
+            old_stdout = sys.stdout
+            old_stderr = sys.stderr
+            
+            capture = OutputCapture()
+            sys.stdout = capture
+            sys.stderr = capture
+            
+            try:
+                yield captured_output
+            finally:
+                sys.stdout = old_stdout
+                sys.stderr = old_stderr
+        else:
+            # Raw mode - no capture
+            yield []
 
 # Global instance
 verbose_manager = VerboseOutputManager()
