@@ -1,54 +1,65 @@
-"""
-Enhanced Widgets Module for LSDAI v2.0
-Provides an advanced UI widget system with modern styling and features.
-"""
+# ~ enhanced_widgets_en.py | by ANXETY - Refactored for Tabbed UI & Enhanced UX ~
 
-import os
-import json
+from modules.widget_factory import WidgetFactory
+from modules.webui_utils import update_current_webui
+from modules import json_utils as js
+
+from IPython.display import display, Javascript, HTML
 import ipywidgets as widgets
 from pathlib import Path
-from IPython.display import display, HTML, Javascript
+import json
+import os
 import sys
 
-# Add modules to path
-CURRENT_DIR = Path.cwd()
-MODULES_DIR = CURRENT_DIR / 'modules'
-SCRIPTS_DIR = CURRENT_DIR / 'scripts'
-CSS_DIR = CURRENT_DIR / 'CSS'
-JS_DIR = CURRENT_DIR / 'JS'
+# --- ROBUST PATH RESOLUTION ---
+def find_script_path():
+    """Find the absolute path to the 'scripts' directory using multiple methods."""
+    try: return Path(__file__).parent.resolve()
+    except NameError: pass
+    env_path = os.environ.get('scr_path')
+    if env_path:
+        scripts_dir = Path(env_path) / 'scripts'
+        if scripts_dir.exists() and (scripts_dir / '_models_data.py').exists(): return scripts_dir
+    cwd = Path.cwd()
+    if (cwd / 'scripts' / '_models_data.py').exists(): return cwd / 'scripts'
+    if cwd.name == 'scripts' and (cwd / '_models_data.py').exists(): return cwd
+    hardcoded_path = Path('/content/LSDAI/scripts')
+    if hardcoded_path.exists(): return hardcoded_path
+    raise FileNotFoundError("Could not determine the script path. Please ensure you are running from the LSDAI directory.")
 
-if str(MODULES_DIR) not in sys.path:
-    sys.path.insert(0, str(MODULES_DIR))
-
-# Try to import our modules
 try:
-    from widget_factory import WidgetFactory
-    from json_utils import save_settings, load_settings
-    IN_COLAB = 'google.colab' in str(get_ipython())
-    SCRIPTS = CURRENT_DIR / 'scripts'
-    SETTINGS_PATH = CURRENT_DIR / 'settings.json'
-    print("✅ Core modules imported successfully.")
-except ImportError as e:
-    print(f"❌ Error importing modules: {e}")
-    print("   Using fallback widget creation...")
-    WidgetFactory = None
-    IN_COLAB = False
+    SCRIPTS = find_script_path()
+    SCR_PATH = SCRIPTS.parent
+    SETTINGS_PATH = SCR_PATH / 'settings.json'
+    CSS = SCR_PATH / 'CSS'
+    JS = SCR_PATH / 'JS'
+except FileNotFoundError as e:
+    print(f"FATAL ERROR: {e}")
+    sys.exit(1)
+# --- END OF FIX ---
 
+# Conditional imports for platform-specific features
+try:
+    from google.colab import output, drive
+    IN_COLAB = True
+except ImportError:
+    IN_COLAB = False
+    class DummyOutput:
+        @staticmethod
+        def register_callback(name, func): pass
+    output = DummyOutput()
+
+# --- WIDGET MANAGER ---
 class WidgetManager:
-    """Main widget manager class for enhanced widgets."""
+    """Manages the creation, layout, and logic of the UI widgets."""
     
     def __init__(self):
-        """Initialize the widget manager."""
-        if WidgetFactory:
-            self.factory = WidgetFactory()
-        else:
-            self.factory = None
-        
+        self.factory = WidgetFactory()
         self.widgets = {}
         self.selection_containers = {}
         
-        # Define required widget keys
-        self.WIDGET_KEYS = [
+        # Define widget keys for settings persistence
+        self.settings_keys = [
             'latest_webui', 'latest_extensions', 'change_webui', 'detailed_download', 
             'XL_models', 'inpainting_model', 'commit_hash', 'check_custom_nodes_deps',
             'civitai_token', 'huggingface_token', 'zrok_token', 'ngrok_token', 
@@ -57,7 +68,7 @@ class WidgetManager:
             'custom_file_urls'
         ]
         
-        # WebUI command line selection
+        # WebUI command line argument templates
         self.WEBUI_SELECTION = {
             'A1111':   "--xformers --no-half-vae --share --lowram",
             'ComfyUI': "--dont-print-server",
@@ -148,11 +159,14 @@ class WidgetManager:
         )
         
         # Header layout
+        left_toggles = self.factory.create_hbox([self.widgets['latest_webui'], self.widgets['latest_extensions']], class_names=['header-group'])
+        right_toggles = self.factory.create_hbox([self.widgets['inpainting_model'], self.widgets['XL_models']], class_names=['header-group'])
+        
         header_controls = self.factory.create_hbox([
-            self.factory.create_hbox([self.widgets['latest_webui'], self.widgets['latest_extensions']], class_names=['header-group']),
-            self.widgets['change_webui'], 
+            left_toggles,
+            self.widgets['change_webui'],
             self.widgets['detailed_download'],
-            self.factory.create_hbox([self.widgets['inpainting_model'], self.widgets['XL_models']], class_names=['header-group'])
+            right_toggles
         ], class_names=['header-controls'])
 
         # --- TABBED SELECTION INTERFACE ---
@@ -170,99 +184,70 @@ class WidgetManager:
             tab_widget.set_title(i, title)
         tab_widget.add_class('selection-tabs')
         
-        # --- WIDGET CREATION WITH FIXED PARAMETER ORDER ---
-        self.widgets.update({
-            # FIXED: Use proper parameter order (value, description) for checkboxes
-            'check_custom_nodes_deps': self.factory.create_checkbox(
-                value=True, 
-                description='Check ComfyUI Dependencies', 
-                layout={'display': 'none'}
-            ),
-            'commit_hash': self.factory.create_text(
-                value='',
-                description='Commit Hash:',
-                placeholder='Optional: Use a specific commit'
-            ),
-            'commandline_arguments': self.factory.create_text(
-                value=self.WEBUI_SELECTION['A1111'],
-                description='Arguments:'
-            ),
-            'theme_accent': self.factory.create_dropdown(
-                options=['anxety', 'blue', 'green', 'peach', 'pink', 'red', 'yellow'],
-                value='anxety',
-                description='Theme Accent:'
-            ),
-            # FIXED: Correct parameter order for empowerment checkbox
-            'empowerment': self.factory.create_checkbox(
-                value=False,
-                description='Empowerment Mode'
-            ),
-            'empowerment_output': self.factory.create_textarea(
-                value='',
-                description='Use special tags like $ckpt, $lora, etc.'
-            ),
-            'Model_url': self.factory.create_text(description='Model URL:'),
-            'Vae_url': self.factory.create_text(description='Vae URL:'),
-            'LoRA_url': self.factory.create_text(description='LoRA URL:'),
-            'Embedding_url': self.factory.create_text(description='Embedding URL:'),
-            'Extensions_url': self.factory.create_text(description='Extensions URL:'),
-            'ADetailer_url': self.factory.create_text(description='ADetailer URL:'),
-            'custom_file_urls': self.factory.create_text(description='File (txt):')
-        })
-
-        # --- API TOKEN BOXES ---
-        civitai_box, self.widgets['civitai_token'] = self.create_api_token_box(
-            'CivitAI Token:', 'Paste token here', 
-            'https://civitai.com/user/account', 'CIVITAI_API_TOKEN'
+        # --- ACCORDION FOR OTHER SETTINGS ---
+        # 1. Additional Configuration (Now includes API Tokens)
+        # FIXED: Proper parameter order for checkboxes
+        self.widgets['check_custom_nodes_deps'] = self.factory.create_checkbox(
+            value=True, 
+            description='Check ComfyUI Dependencies', 
+            layout={'display': 'none'}
+        )
+        self.widgets['commit_hash'] = self.factory.create_text(
+            value='',
+            description='Commit Hash:',
+            placeholder='Optional: Use a specific commit'
+        )
+        self.widgets['commandline_arguments'] = self.factory.create_text(
+            value=self.WEBUI_SELECTION['A1111'],
+            description='Arguments:'
         )
         
-        hf_box, self.widgets['huggingface_token'] = self.create_api_token_box(
-            'HuggingFace Token:', 'Paste token here',
-            'https://huggingface.co/settings/tokens', 'HUGGINGFACE_API_TOKEN'
+        accent_colors = ['anxety', 'blue', 'green', 'peach', 'pink', 'red', 'yellow']
+        self.widgets['theme_accent'] = self.factory.create_dropdown(
+            options=accent_colors,
+            value='anxety',
+            description='Theme Accent:'
         )
         
-        zrok_box, self.widgets['zrok_token'] = self.create_api_token_box(
-            'Zrok Token:', 'Paste token here',
-            'https://zrok.io/', 'ZROK_API_TOKEN'
-        )
+        civitai_box, self.widgets['civitai_token'] = self.create_api_token_box('CivitAI Token:', 'Paste token here', 'https://civitai.com/user/account', 'CIVITAI_API_TOKEN')
+        hf_box, self.widgets['huggingface_token'] = self.create_api_token_box('HuggingFace Token:', 'Paste token here', 'https://huggingface.co/settings/tokens', 'HUGGINGFACE_API_TOKEN')
+        zrok_box, self.widgets['zrok_token'] = self.create_api_token_box('Zrok Token:', 'Paste token here', 'https://zrok.io/', 'ZROK_API_TOKEN')
+        ngrok_box, self.widgets['ngrok_token'] = self.create_api_token_box('Ngrok Token:', 'Paste token here', 'https://dashboard.ngrok.com/get-started/your-authtoken', 'NGROK_API_TOKEN')
         
-        ngrok_box, self.widgets['ngrok_token'] = self.create_api_token_box(
-            'Ngrok Token:', 'Paste token here',
-            'https://dashboard.ngrok.com/get-started/your-authtoken', 'NGROK_API_TOKEN'
-        )
-
-        # --- ACCORDION CONTAINERS ---
-        # 1. Additional Configuration
         additional_vbox = self.factory.create_vbox([
-            self.widgets['check_custom_nodes_deps'],
-            self.widgets['commit_hash'], 
-            self.widgets['commandline_arguments'],
-            self.widgets['theme_accent'],
+            self.widgets['check_custom_nodes_deps'], self.widgets['commit_hash'], 
+            self.widgets['commandline_arguments'], self.widgets['theme_accent'],
             widgets.HTML('<hr class="divider">'),
-            civitai_box,
-            hf_box,
-            zrok_box,
-            ngrok_box
+            civitai_box, hf_box, zrok_box, ngrok_box
         ])
 
         # 2. Custom Download / Empowerment
+        # FIXED: Proper parameter order for empowerment checkbox
+        self.widgets['empowerment'] = self.factory.create_checkbox(
+            value=False,
+            description='Empowerment Mode'
+        )
+        self.widgets['empowerment_output'] = self.factory.create_textarea(
+            value='',
+            description='Use special tags like $ckpt, $lora, etc.'
+        )
+        self.widgets['Model_url'] = self.factory.create_text(description='Model URL:')
+        self.widgets['Vae_url'] = self.factory.create_text(description='Vae URL:')
+        self.widgets['LoRA_url'] = self.factory.create_text(description='LoRA URL:')
+        self.widgets['Embedding_url'] = self.factory.create_text(description='Embedding URL:')
+        self.widgets['Extensions_url'] = self.factory.create_text(description='Extensions URL:')
+        self.widgets['ADetailer_url'] = self.factory.create_text(description='ADetailer URL:')
+        self.widgets['custom_file_urls'] = self.factory.create_text(description='File (txt):')
+        
         self.custom_dl_container = self.factory.create_vbox([
-            self.widgets['Model_url'],
-            self.widgets['Vae_url'],
-            self.widgets['LoRA_url'],
-            self.widgets['Embedding_url'],
-            self.widgets['Extensions_url'],
-            self.widgets['ADetailer_url'],
+            self.widgets['Model_url'], self.widgets['Vae_url'], self.widgets['LoRA_url'],
+            self.widgets['Embedding_url'], self.widgets['Extensions_url'], self.widgets['ADetailer_url'],
             self.widgets['custom_file_urls']
         ])
-        
         custom_dl_vbox = self.factory.create_vbox([
-            self.widgets['empowerment'],
-            self.widgets['empowerment_output'],
-            self.custom_dl_container
+            self.widgets['empowerment'], self.widgets['empowerment_output'], self.custom_dl_container
         ])
         
-        # Create accordion
         accordion = widgets.Accordion(children=[additional_vbox, custom_dl_vbox])
         accordion.set_title(0, 'Advanced Configuration & API Tokens')
         accordion.set_title(1, 'Custom Download / Empowerment')
@@ -276,14 +261,7 @@ class WidgetManager:
         # --- SIDEBAR FOR G-DRIVE, IMPORT/EXPORT ---
         BTN_STYLE = {'width': '48px', 'height': '48px'}
         TOOLTIPS = ("Disconnect Google Drive", "Connect Google Drive")
-        
-        # Check Google Drive status
-        try:
-            from json_utils import read as js_read
-            GD_status = js_read(SETTINGS_PATH, 'mountGDrive', False)
-        except:
-            GD_status = False
-            
+        GD_status = js.read(SETTINGS_PATH, 'mountGDrive', False)
         self.gdrive_button = self.factory.create_button('📁', layout=BTN_STYLE, class_names=['side-button'])
         self.gdrive_button.tooltip = TOOLTIPS[not GD_status]
         
@@ -315,6 +293,7 @@ class WidgetManager:
             self.gdrive_button.on_click(self.handle_gdrive_toggle)
             self.export_button.on_click(self.export_settings)
             self.import_button.on_click(self.import_settings)
+            output.register_callback('importSettingsFromJS', self.apply_imported_settings)
             
         # Update empowerment and webui on initial load
         self.update_empowerment({'new': self.widgets['empowerment'].value})
@@ -407,18 +386,15 @@ class WidgetManager:
             }
             
             # Add all other widget values
-            for key in self.WIDGET_KEYS:
+            for key in self.settings_keys:
                 if key in self.widgets:
                     widget = self.widgets[key]
                     if hasattr(widget, 'value'):
                         data[key] = widget.value
             
             # Save to settings
-            if save_settings:
-                save_settings(data, section='WIDGETS')
-                self.show_notification("Settings saved successfully!", "success")
-            else:
-                print("Settings saved (fallback):", data)
+            js.save_settings(data, section='WIDGETS')
+            self.show_notification("Settings saved successfully!", "success")
                 
         except Exception as e:
             print(f"Error saving settings: {e}")
@@ -427,10 +403,9 @@ class WidgetManager:
     def load_settings(self):
         """Load settings from file."""
         try:
-            if load_settings:
-                settings = load_settings(section='WIDGETS')
-                if settings:
-                    self.apply_settings(settings)
+            settings = js.load_settings(section='WIDGETS')
+            if settings:
+                self.apply_settings(settings)
         except Exception as e:
             print(f"Error loading settings: {e}")
 
@@ -443,7 +418,7 @@ class WidgetManager:
                 btn.value = btn.description in selected_items
         
         # Apply to other widgets
-        for key in self.WIDGET_KEYS:
+        for key in self.settings_keys:
             if key in settings and key in self.widgets:
                 try:
                     self.widgets[key].value = settings[key]
@@ -452,44 +427,32 @@ class WidgetManager:
 
     def show_notification(self, message, type_="info"):
         """Show a notification popup."""
-        if self.notification_popup:
+        if hasattr(self, 'notification_popup') and self.notification_popup:
             self.notification_popup.value = f'''
                 <div class="notification {type_}">
                     <span class="icon">{'✅' if type_ == 'success' else '❌' if type_ == 'error' else 'ℹ️'}</span>
                     {message}
                 </div>
             '''
-            # Auto-hide after 3 seconds
-            def hide_notification():
-                import time
-                time.sleep(3)
-                if self.notification_popup:
-                    self.notification_popup.value = ''
-            
-            import threading
-            threading.Thread(target=hide_notification).start()
 
     def handle_gdrive_toggle(self, button):
         """Handle Google Drive connection toggle."""
-        # Placeholder for Google Drive functionality
         self.show_notification("Google Drive functionality coming soon!", "info")
 
     def export_settings(self, button):
         """Export settings to JSON file."""
         try:
-            if load_settings:
-                settings = load_settings()
-                if settings:
-                    import json
-                    settings_json = json.dumps(settings, indent=2)
-                    self.show_notification("Settings exported successfully!", "success")
-                    print("Settings JSON:", settings_json)
+            settings = js.load_settings()
+            if settings:
+                import json
+                settings_json = json.dumps(settings, indent=2)
+                self.show_notification("Settings exported successfully!", "success")
+                print("Settings JSON:", settings_json)
         except Exception as e:
             self.show_notification(f"Export failed: {e}", "error")
 
     def import_settings(self, button):
         """Import settings from JSON file."""
-        # Placeholder for import functionality
         self.show_notification("Import functionality coming soon!", "info")
 
     def apply_imported_settings(self, settings_str):
@@ -503,22 +466,15 @@ class WidgetManager:
         except Exception as e:
             self.show_notification(f"Import failed: {e}", "error")
 
-
-def main():
-    """Main function to run the enhanced widgets interface."""
-    if not WidgetFactory:
-        print("❌ Error: WidgetFactory not available. Using fallback.")
-        return
-    
-    # Load CSS and JS if available
+# --- EXECUTION ---
+if __name__ == "__main__":
+    WidgetFactory().load_css(CSS / 'enhanced-widgets.css')
     if IN_COLAB:
-        WidgetFactory().load_css(CSS / 'enhanced-widgets.css')
         WidgetFactory().load_js(JS / 'main-widgets.js')
-    
+
     manager = WidgetManager()
     main_container = manager.build_ui()
     display(main_container)
+    
     manager.load_settings()
-
-if __name__ == "__main__":
-    main()
+    manager.setup_callbacks()
