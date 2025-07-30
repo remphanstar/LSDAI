@@ -1,8 +1,9 @@
-# ~ enhanced_widgets_en.py | by ANXETY - Refactored for Tabbed UI & Enhanced UX ~
+# ~ enhanced_widgets_en.py | Enhanced Widgets with Verbosity Control Integration ~
 
 from modules.widget_factory import WidgetFactory
 from modules.webui_utils import update_current_webui
 from modules import json_utils as js
+from modules.verbose_output_manager import get_verbose_manager, VerbosityLevel
 
 from IPython.display import display, Javascript, HTML
 import ipywidgets as widgets
@@ -36,7 +37,6 @@ try:
 except FileNotFoundError as e:
     print(f"FATAL ERROR: {e}")
     sys.exit(1)
-# --- END OF FIX ---
 
 # Conditional imports for platform-specific features
 try:
@@ -49,14 +49,15 @@ except ImportError:
         def register_callback(name, func): pass
     output = DummyOutput()
 
-# --- WIDGET MANAGER ---
+# --- WIDGET MANAGER WITH VERBOSITY INTEGRATION ---
 class WidgetManager:
-    """Manages the creation, layout, and logic of the UI widgets."""
+    """Manages the creation, layout, and logic of the UI widgets with verbosity control."""
     
     def __init__(self):
         self.factory = WidgetFactory()
         self.widgets = {}
         self.selection_containers = {}
+        self.verbose_manager = get_verbose_manager()
         
         # Define widget keys for settings persistence
         self.settings_keys = [
@@ -65,7 +66,7 @@ class WidgetManager:
             'civitai_token', 'huggingface_token', 'zrok_token', 'ngrok_token', 
             'commandline_arguments', 'theme_accent', 'empowerment', 'empowerment_output',
             'Model_url', 'Vae_url', 'LoRA_url', 'Embedding_url', 'Extensions_url', 'ADetailer_url',
-            'custom_file_urls'
+            'custom_file_urls', 'verbosity_level'  # Add verbosity to settings
         ]
         
         # WebUI command line argument templates
@@ -94,7 +95,7 @@ class WidgetManager:
                 exec(f.read(), {}, local_vars)
             return local_vars.get(key, {})
         except Exception as e:
-            print(f"Error reading {data_type} data: {e}")
+            self.verbose_manager.print_if_verbose(f"Error reading {data_type} data: {e}", VerbosityLevel.DETAILED)
             return {}
 
     def create_api_token_box(self, description, placeholder, url, env_var):
@@ -109,6 +110,230 @@ class WidgetManager:
         
         button = self.factory.create_html(f'<a href="{url}" target="_blank" class="button button_api"><span class="icon">?</span><span class="text">GET</span></a>')
         return self.factory.create_hbox([widget, button]), widget
+
+    def create_verbosity_control_section(self):
+        """Create the verbosity control section for the UI"""
+        
+        # Create verbosity level dropdown
+        verbosity_options = [
+            ("Silent (Errors Only)", VerbosityLevel.SILENT),
+            ("Minimal (Basic Status)", VerbosityLevel.MINIMAL), 
+            ("Normal (Standard Output)", VerbosityLevel.NORMAL),
+            ("Detailed (Show Commands)", VerbosityLevel.DETAILED),
+            ("Verbose (Full Debug)", VerbosityLevel.VERBOSE),
+            ("Raw (Everything)", VerbosityLevel.RAW)
+        ]
+        
+        self.widgets['verbosity_level'] = self.factory.create_dropdown(
+            options=[opt[0] for opt in verbosity_options],
+            value=verbosity_options[self.verbose_manager.verbosity_level][0],
+            description='Output Level:'
+        )
+        
+        # Create detailed download toggle (for backwards compatibility)
+        self.widgets['detailed_download'] = widgets.ToggleButton(
+            value=(self.verbose_manager.verbosity_level >= VerbosityLevel.DETAILED),
+            description='Detailed Output',
+            button_style='success' if (self.verbose_manager.verbosity_level >= VerbosityLevel.DETAILED) else '',
+            tooltip='Toggle detailed output for all operations across ALL cells'
+        )
+        
+        # Create real-time output toggle
+        self.widgets['real_time_output'] = widgets.ToggleButton(
+            value=True,
+            description='Real-time Output',
+            button_style='info',
+            tooltip='Show output in real-time during operations'
+        )
+        
+        # Create verbosity info display
+        self.verbosity_info = self.factory.create_html(self._get_verbosity_info_html())
+        
+        # Create demo button to test current verbosity level
+        demo_button = self.factory.create_button(
+            'Test Output Level',
+            class_names=['button'],
+            button_style='info'
+        )
+        demo_button.on_click(self._demo_verbosity_level)
+        
+        # Setup callbacks
+        self.widgets['verbosity_level'].observe(self._on_verbosity_dropdown_change, names='value')
+        self.widgets['detailed_download'].observe(self._on_detailed_toggle_change, names='value')
+        self.widgets['real_time_output'].observe(self._on_realtime_toggle_change, names='value')
+        
+        # Create the verbosity control panel
+        verbosity_controls = self.factory.create_vbox([
+            self.factory.create_html("<h4>🔧 Global Output Verbosity Control</h4>"),
+            self.factory.create_html("<p><em>Controls output detail level for ALL notebook cells and operations</em></p>"),
+            self.widgets['verbosity_level'],
+            self.factory.create_hbox([
+                self.widgets['detailed_download'], 
+                self.widgets['real_time_output']
+            ]),
+            demo_button,
+            self.verbosity_info
+        ], class_names=['verbosity-control-panel'])
+        
+        return verbosity_controls
+
+    def _on_verbosity_dropdown_change(self, change):
+        """Handle verbosity dropdown change"""
+        verbosity_options = [
+            ("Silent (Errors Only)", VerbosityLevel.SILENT),
+            ("Minimal (Basic Status)", VerbosityLevel.MINIMAL), 
+            ("Normal (Standard Output)", VerbosityLevel.NORMAL),
+            ("Detailed (Show Commands)", VerbosityLevel.DETAILED),
+            ("Verbose (Full Debug)", VerbosityLevel.VERBOSE),
+            ("Raw (Everything)", VerbosityLevel.RAW)
+        ]
+        
+        # Find the verbosity level based on the selected option
+        selected_text = change['new']
+        new_level = VerbosityLevel.NORMAL  # Default
+        
+        for text, level in verbosity_options:
+            if text == selected_text:
+                new_level = level
+                break
+        
+        # Update verbosity manager
+        self.verbose_manager.set_verbosity(new_level)
+        
+        # Update detailed download toggle
+        self.widgets['detailed_download'].value = (new_level >= VerbosityLevel.DETAILED)
+        self.widgets['detailed_download'].button_style = 'success' if (new_level >= VerbosityLevel.DETAILED) else ''
+        
+        # Update info display
+        self.verbosity_info.value = self._get_verbosity_info_html()
+        
+        # Show notification about the change
+        self.show_notification(f"Output verbosity changed to: {selected_text}", "info")
+
+    def _on_detailed_toggle_change(self, change):
+        """Handle detailed download toggle change"""
+        if change['new']:
+            # Enable detailed mode - set to RAW for maximum output
+            new_level = VerbosityLevel.RAW
+            self.widgets['detailed_download'].button_style = 'success'
+            self.show_notification("🔧 RAW OUTPUT MODE ENABLED - All operations will show complete output", "warning")
+        else:
+            # Return to normal mode
+            new_level = VerbosityLevel.NORMAL
+            self.widgets['detailed_download'].button_style = ''
+            self.show_notification("📋 Normal output mode restored", "success")
+        
+        # Update verbosity manager
+        self.verbose_manager.set_verbosity(new_level)
+        
+        # Update dropdown to match
+        verbosity_options = [
+            ("Silent (Errors Only)", VerbosityLevel.SILENT),
+            ("Minimal (Basic Status)", VerbosityLevel.MINIMAL), 
+            ("Normal (Standard Output)", VerbosityLevel.NORMAL),
+            ("Detailed (Show Commands)", VerbosityLevel.DETAILED),
+            ("Verbose (Full Debug)", VerbosityLevel.VERBOSE),
+            ("Raw (Everything)", VerbosityLevel.RAW)
+        ]
+        
+        for text, level in verbosity_options:
+            if level == new_level:
+                self.widgets['verbosity_level'].value = text
+                break
+        
+        # Update info display
+        self.verbosity_info.value = self._get_verbosity_info_html()
+
+    def _on_realtime_toggle_change(self, change):
+        """Handle real-time output toggle change"""
+        self.verbose_manager.real_time_display = change['new']
+        if change['new']:
+            self.widgets['real_time_output'].button_style = 'info'
+            self.show_notification("Real-time output enabled", "info")
+        else:
+            self.widgets['real_time_output'].button_style = ''
+            self.show_notification("Real-time output disabled", "info")
+
+    def _demo_verbosity_level(self, button):
+        """Demonstrate the current verbosity level"""
+        self.show_notification("Testing current verbosity level...", "info")
+        
+        # Show what each level displays
+        self.verbose_manager.print_if_verbose("Silent level: This only shows on errors", VerbosityLevel.SILENT)
+        self.verbose_manager.print_if_verbose("📝 Minimal level: Basic status messages", VerbosityLevel.MINIMAL)
+        self.verbose_manager.print_if_verbose("📋 Normal level: Standard LSDAI output", VerbosityLevel.NORMAL)
+        self.verbose_manager.print_if_verbose("🔍 Detailed level: Command outputs and details", VerbosityLevel.DETAILED)
+        self.verbose_manager.print_if_verbose("📊 Verbose level: Full debug information", VerbosityLevel.VERBOSE)
+        self.verbose_manager.print_if_verbose("🔧 Raw level: Literally everything, no filtering", VerbosityLevel.RAW)
+        
+        # Demonstrate a subprocess call
+        try:
+            self.verbose_manager.run_subprocess(["echo", "This is a test command to demonstrate verbosity"])
+        except Exception as e:
+            print(f"Demo command failed: {e}")
+
+    def _get_verbosity_info_html(self) -> str:
+        """Get HTML description of current verbosity level"""
+        level_info = {
+            VerbosityLevel.SILENT: {
+                "name": "Silent",
+                "desc": "Only critical errors shown",
+                "color": "#6b7280",
+                "affects": "❌ No subprocess output, ❌ No pip details, ❌ No download progress"
+            },
+            VerbosityLevel.MINIMAL: {
+                "name": "Minimal",
+                "desc": "Basic status messages only", 
+                "color": "#374151",
+                "affects": "📝 Basic status, ❌ No command details, ❌ No pip output"
+            },
+            VerbosityLevel.NORMAL: {
+                "name": "Normal",
+                "desc": "Standard LSDAI output (default)",
+                "color": "#059669",
+                "affects": "📋 Standard messages, ✅ Clean output, 📦 Basic install info"
+            },
+            VerbosityLevel.DETAILED: {
+                "name": "Detailed",
+                "desc": "Show command outputs and details",
+                "color": "#0369a1",
+                "affects": "🔍 Command execution, 📤 Abbreviated outputs, 📦 Pip progress"
+            },
+            VerbosityLevel.VERBOSE: {
+                "name": "Verbose",
+                "desc": "Full debug information",
+                "color": "#7c2d12",
+                "affects": "📊 Full command output, 🔧 Debug info, 📦 Detailed pip output"
+            },
+            VerbosityLevel.RAW: {
+                "name": "Raw Output",
+                "desc": "Everything - no filtering whatsoever",
+                "color": "#dc2626",
+                "affects": "🔧 Raw Python output, 📊 All subprocess calls, 📦 Maximum pip verbosity"
+            }
+        }
+        
+        current = level_info.get(self.verbose_manager.verbosity_level, level_info[VerbosityLevel.NORMAL])
+        
+        return f"""
+        <div style="padding: 15px; background: linear-gradient(135deg, #f3f4f6 0%, #e5e7eb 100%); 
+                    border-radius: 8px; margin-top: 10px; border-left: 4px solid {current['color']};">
+            <div style="display: flex; align-items: center; margin-bottom: 8px;">
+                <div style="width: 12px; height: 12px; background: {current['color']}; 
+                           border-radius: 50%; margin-right: 8px;"></div>
+                <strong style="color: {current['color']};">Current: {current['name']}</strong>
+            </div>
+            <div style="margin-bottom: 8px; color: #374151;">
+                {current['desc']}
+            </div>
+            <div style="font-size: 12px; color: #6b7280;">
+                <strong>Affects:</strong> {current['affects']}
+            </div>
+            <div style="font-size: 11px; color: #9ca3af; margin-top: 8px; font-style: italic;">
+                This setting controls output in ALL cells: Setup, Widgets, Download, and Launch
+            </div>
+        </div>
+        """
 
     def create_selection_list(self, data_type, options_dict):
         """Create a selection list of toggle buttons."""
@@ -144,14 +369,18 @@ class WidgetManager:
     def build_ui(self):
         """Constructs and returns the entire widget UI."""
         
-        # --- HEADER CONTROLS (Single Line Layout using ToggleButtons) ---
+        # --- VERBOSITY CONTROL SECTION (TOP) ---
+        verbosity_section = self.create_verbosity_control_section()
+        
+        # --- HEADER CONTROLS ---
         self.widgets['latest_webui'] = widgets.ToggleButton(value=True, description='Update WebUI', button_style='')
         self.widgets['latest_extensions'] = widgets.ToggleButton(value=True, description='Update Extensions', button_style='')
         self.widgets['inpainting_model'] = widgets.ToggleButton(value=False, description='Inpainting', button_style='')
         self.widgets['XL_models'] = widgets.ToggleButton(value=False, description='SDXL', button_style='')
-        self.widgets['detailed_download'] = widgets.ToggleButton(value=False, description='Detailed Output', button_style='')
         
-        # Create WebUI dropdown - FIXED: Correct parameter order
+        # NOTE: detailed_download is now created in verbosity section
+        
+        # Create WebUI dropdown
         self.widgets['change_webui'] = self.factory.create_dropdown(
             options=list(self.WEBUI_SELECTION.keys()),
             value='A1111',
@@ -165,7 +394,6 @@ class WidgetManager:
         header_controls = self.factory.create_hbox([
             left_toggles,
             self.widgets['change_webui'],
-            self.widgets['detailed_download'],
             right_toggles
         ], class_names=['header-controls'])
 
@@ -186,7 +414,6 @@ class WidgetManager:
         
         # --- ACCORDION FOR OTHER SETTINGS ---
         # 1. Additional Configuration (Now includes API Tokens)
-        # FIXED: Proper parameter order for checkboxes
         self.widgets['check_custom_nodes_deps'] = self.factory.create_checkbox(
             value=True, 
             description='Check ComfyUI Dependencies', 
@@ -222,7 +449,6 @@ class WidgetManager:
         ])
 
         # 2. Custom Download / Empowerment
-        # FIXED: Proper parameter order for empowerment checkbox
         self.widgets['empowerment'] = self.factory.create_checkbox(
             value=False,
             description='Empowerment Mode'
@@ -277,8 +503,15 @@ class WidgetManager:
         if not IN_COLAB:
             sidebar.layout.display = 'none'
 
-        # --- FINAL LAYOUT ---
-        main_content = self.factory.create_vbox([header_controls, tab_widget, accordion, save_button], class_names=['main-content'])
+        # --- FINAL LAYOUT WITH VERBOSITY CONTROL AT TOP ---
+        main_content = self.factory.create_vbox([
+            verbosity_section,        # Verbosity control at the top
+            header_controls, 
+            tab_widget, 
+            accordion, 
+            save_button
+        ], class_names=['main-content'])
+        
         return self.factory.create_hbox([main_content, sidebar], class_names=['main-ui-container'])
 
     def setup_callbacks(self):
@@ -385,29 +618,39 @@ class WidgetManager:
                 'cnet': [btn.description for btn in self.widgets.get('cnet', []) if btn.value],
             }
             
-            # Add all other widget values
+            # Add all other widget values including verbosity
             for key in self.settings_keys:
                 if key in self.widgets:
                     widget = self.widgets[key]
                     if hasattr(widget, 'value'):
                         data[key] = widget.value
             
-            # Save to settings
+            # Add current verbosity level
+            data['verbosity_level'] = self.verbose_manager.verbosity_level
+            
+            # Save to settings using verbose-aware method
+            self.verbose_manager.print_if_verbose("💾 Saving widget settings...", VerbosityLevel.DETAILED)
             js.save_settings(data, section='WIDGETS')
+            self.verbose_manager.print_if_verbose("✅ Settings saved successfully", VerbosityLevel.DETAILED)
+            
             self.show_notification("Settings saved successfully!", "success")
                 
         except Exception as e:
-            print(f"Error saving settings: {e}")
-            self.show_notification(f"Error saving settings: {e}", "error")
+            error_msg = f"Error saving settings: {e}"
+            self.verbose_manager.print_if_verbose(error_msg, VerbosityLevel.MINIMAL)  # Always show errors
+            self.show_notification(error_msg, "error")
 
     def load_settings(self):
         """Load settings from file."""
         try:
+            self.verbose_manager.print_if_verbose("📂 Loading widget settings...", VerbosityLevel.DETAILED)
             settings = js.load_settings(section='WIDGETS')
             if settings:
                 self.apply_settings(settings)
+                self.verbose_manager.print_if_verbose("✅ Settings loaded successfully", VerbosityLevel.DETAILED)
         except Exception as e:
-            print(f"Error loading settings: {e}")
+            error_msg = f"Error loading settings: {e}"
+            self.verbose_manager.print_if_verbose(error_msg, VerbosityLevel.MINIMAL)  # Always show errors
 
     def apply_settings(self, settings):
         """Apply loaded settings to widgets."""
@@ -424,6 +667,15 @@ class WidgetManager:
                     self.widgets[key].value = settings[key]
                 except:
                     pass
+        
+        # Apply verbosity level if saved
+        if 'verbosity_level' in settings:
+            saved_level = settings['verbosity_level']
+            self.verbose_manager.set_verbosity(saved_level)
+            
+            # Update verbosity widgets
+            if hasattr(self, 'verbosity_info'):
+                self.verbosity_info.value = self._get_verbosity_info_html()
 
     def show_notification(self, message, type_="info"):
         """Show a notification popup."""
@@ -447,7 +699,7 @@ class WidgetManager:
                 import json
                 settings_json = json.dumps(settings, indent=2)
                 self.show_notification("Settings exported successfully!", "success")
-                print("Settings JSON:", settings_json)
+                self.verbose_manager.print_if_verbose(f"Settings JSON: {settings_json}", VerbosityLevel.VERBOSE)
         except Exception as e:
             self.show_notification(f"Export failed: {e}", "error")
 
@@ -468,13 +720,25 @@ class WidgetManager:
 
 # --- EXECUTION ---
 if __name__ == "__main__":
+    # Load CSS/JS with verbose feedback
+    verbose_manager = get_verbose_manager()
+    
+    verbose_manager.print_if_verbose("🎨 Loading enhanced widgets CSS...", VerbosityLevel.DETAILED)
     WidgetFactory().load_css(CSS / 'enhanced-widgets.css')
+    
     if IN_COLAB:
+        verbose_manager.print_if_verbose("📜 Loading enhanced widgets JavaScript...", VerbosityLevel.DETAILED)
         WidgetFactory().load_js(JS / 'main-widgets.js')
 
+    verbose_manager.print_if_verbose("🏗️ Building widget interface...", VerbosityLevel.DETAILED)
     manager = WidgetManager()
     main_container = manager.build_ui()
     display(main_container)
     
+    verbose_manager.print_if_verbose("📂 Loading saved settings...", VerbosityLevel.DETAILED)
     manager.load_settings()
+    
+    verbose_manager.print_if_verbose("🔗 Setting up widget callbacks...", VerbosityLevel.DETAILED)
     manager.setup_callbacks()
+    
+    verbose_manager.print_if_verbose("✅ Enhanced widgets loaded successfully!", VerbosityLevel.NORMAL)
