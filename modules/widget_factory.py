@@ -467,3 +467,33 @@ class WidgetFactory:
             widget.close()
         
         return widget
+    
+    # === MISSING METHODS FOR WIDGET COMPATIBILITY ===
+    
+    def create_header(self, text, class_names=None):
+        """Create a header widget."""
+        header_html = f'<h2 class="widget-header">{text}</h2>'
+        return self.create_html(header_html, class_names)
+    
+    def create_dropdown_multiple(self, options, value, description='', class_names=None, **kwargs):
+        """Create a multiple selection dropdown - FIXED to avoid dict issues"""
+        if not options:
+            options = ['None']
+        
+        # Ensure value is a list
+        if not isinstance(value, (list, tuple)):
+            value = [value]
+        
+        # Filter out invalid values
+        valid_values = [v for v in value if v in options]
+        if not valid_values:
+            valid_values = [options[0]]
+        
+        return self._create_widget(
+            widgets.SelectMultiple,
+            class_names=class_names,
+            options=options,
+            value=valid_values,
+            description=description,
+            **kwargs
+        )
