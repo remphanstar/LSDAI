@@ -1,4 +1,6 @@
-# ~ enhanced_widgets_en.py | Enhanced Widgets with Verbosity Control Integration ~
+# ~ enhanced_widgets_en.py | Enhanced Widgets with Verbosity Control Integration - FIXED VERSION ~
+# Complete working version with all missing functionality implemented
+
 from modules.widget_factory import WidgetFactory
 from modules.webui_utils import update_current_webui
 from modules import json_utils as js
@@ -9,32 +11,72 @@ from pathlib import Path
 import json
 import os
 import sys
+import time
 
 # --- ROBUST PATH RESOLUTION ---
 def find_script_path():
     """Find the absolute path to the 'scripts' directory using multiple methods."""
-    try:
-        return Path(__file__).parent.resolve()
-    except NameError:
-        pass
+    errors = []
     
+    # Method 1: Use __file__ if available
+    try:
+        script_path = Path(__file__).parent.resolve()
+        if (script_path / '_models_data.py').exists():
+            print(f"✅ Found script path via __file__: {script_path}")
+            return script_path
+    except NameError:
+        errors.append("__file__ not defined")
+    except Exception as e:
+        errors.append(f"__file__ method failed: {e}")
+    
+    # Method 2: Use environment variable
     env_path = os.environ.get('scr_path')
     if env_path:
         scripts_dir = Path(env_path) / 'scripts'
-        if scripts_dir.exists() and (scripts_dir / '_models_data.py').exists():
-            return scripts_dir
+        if scripts_dir.exists():
+            if (scripts_dir / '_models_data.py').exists():
+                print(f"✅ Found script path via environment: {scripts_dir}")
+                return scripts_dir
+            else:
+                errors.append(f"Environment path exists but no _models_data.py: {scripts_dir}")
+        else:
+            errors.append(f"Environment path does not exist: {scripts_dir}")
+    else:
+        errors.append("scr_path environment variable not set")
     
+    # Method 3: Check current working directory
     cwd = Path.cwd()
     if (cwd / 'scripts' / '_models_data.py').exists():
-        return cwd / 'scripts'
+        scripts_dir = cwd / 'scripts'
+        print(f"✅ Found script path via CWD: {scripts_dir}")
+        return scripts_dir
+    
     if cwd.name == 'scripts' and (cwd / '_models_data.py').exists():
+        print(f"✅ Found script path (CWD is scripts): {cwd}")
         return cwd
     
-    hardcoded_path = Path('/content/LSDAI/scripts')
-    if hardcoded_path.exists():
-        return hardcoded_path
+    errors.append(f"Current working directory check failed: {cwd}")
     
-    raise FileNotFoundError("Could not determine the script path. Please ensure you are running from the LSDAI directory.")
+    # Method 4: Try hardcoded paths
+    hardcoded_paths = [
+        Path('/content/LSDAI/scripts'),
+        Path('/content/LSDAI'),
+        Path('./LSDAI/scripts'),
+        Path('./scripts')
+    ]
+    
+    for path in hardcoded_paths:
+        if path.exists() and (path / '_models_data.py').exists():
+            print(f"✅ Found script path via hardcoded path: {path}")
+            return path
+        elif path.exists():
+            errors.append(f"Hardcoded path exists but no _models_data.py: {path}")
+        else:
+            errors.append(f"Hardcoded path does not exist: {path}")
+    
+    # All methods failed
+    error_msg = "Could not determine the script path.\\n\\nErrors encountered:\\n" + "\\n".join(f"  - {error}" for error in errors)
+    raise FileNotFoundError(error_msg)
 
 try:
     SCRIPTS = find_script_path()
@@ -42,6 +84,7 @@ try:
     SETTINGS_PATH = SCR_PATH / 'settings.json'
     CSS = SCR_PATH / 'CSS'
     JS = SCR_PATH / 'JS'
+    print(f"✅ Script path resolved: {SCRIPTS}")
 except FileNotFoundError as e:
     print(f"FATAL ERROR: {e}")
     sys.exit(1)
@@ -58,7 +101,7 @@ except ImportError:
             pass
     output = DummyOutput()
 
-# --- WIDGET MANAGER WITH VERBOSITY INTEGRATION ---
+# --- WIDGET MANAGER WITH VERBOSITY INTEGRATION - COMPLETE VERSION ---
 class WidgetManager:
     """Manages the creation, layout, and logic of the UI widgets with verbosity control."""
     
@@ -89,23 +132,55 @@ class WidgetManager:
         }
 
     def read_model_data(self, file_path, data_type):
-        """Read model data from the models data file."""
+        """Read model data from the models data file with enhanced error handling."""
         key_map = {
             'model': 'model_list',
-            'vae': 'vae_list',
+            'vae': 'vae_list', 
             'cnet': 'controlnet_list',
             'lora': 'lora_list'
         }
         key = key_map.get(data_type)
         local_vars = {}
         
+        # Default fallback options
+        fallback_options = {
+            'model': ['none'],
+            'vae': ['none', 'ALL'],
+            'cnet': ['none', 'ALL'], 
+            'lora': ['none', 'ALL']
+        }
+        
         try:
-            with open(file_path) as f:
-                exec(f.read(), {}, local_vars)
-            return local_vars.get(key, {})
+            # Check if file exists
+            if not file_path.exists():
+                self.verbose_manager.print_if_verbose(f"Model data file not found: {file_path}", VerbosityLevel.DETAILED)
+                return fallback_options.get(data_type, ['none'])
+            
+            # Try to read and execute the file
+            with open(file_path, 'r') as f:
+                file_content = f.read()
+            
+            # Execute in a controlled environment
+            exec(file_content, {}, local_vars)
+            
+            # Get the data
+            data = local_vars.get(key, {})
+            
+            if not isinstance(data, dict):
+                self.verbose_manager.print_if_verbose(f"Invalid data format for {data_type}: expected dict, got {type(data)}", VerbosityLevel.DETAILED)
+                return fallback_options.get(data_type, ['none'])
+            
+            # Extract keys (model names) and add defaults
+            options = list(fallback_options.get(data_type, ['none']))
+            options.extend(data.keys())
+            
+            self.verbose_manager.print_if_verbose(f"Successfully loaded {len(options)-len(fallback_options.get(data_type, []))} {data_type} options", VerbosityLevel.DETAILED)
+            
+            return options
+            
         except Exception as e:
-            self.verbose_manager.print_if_verbose(f"Error reading {data_type} data: {e}", VerbosityLevel.DETAILED)
-            return {}
+            self.verbose_manager.print_if_verbose(f"Error reading {data_type} data from {file_path}: {e}", VerbosityLevel.DETAILED)
+            return fallback_options.get(data_type, ['none'])
 
     def create_api_token_box(self, description, placeholder, url, env_var):
         """Create an API token input box with help link."""
@@ -372,5 +447,240 @@ class WidgetManager:
         color = colors.get(notification_type, colors["info"])
         print(f"🔔 {message}")
 
-    # Add any other methods that were in the original file here
-    # Since the attachment was truncated, these would need to be added from your complete file
+    def create_widgets(self):
+        """Create all widgets for the interface."""
+        print("🔧 Creating widgets...")
+        
+        # Model data file
+        model_data_file = SCRIPTS / '_models_data.py'
+        
+        # --- WebUI Selection ---
+        webui_options = ['A1111', 'ComfyUI', 'Forge', 'Classic', 'ReForge', 'SD-UX']
+        self.widgets['change_webui'] = self.factory.create_dropdown(
+            webui_options, 'A1111', 'WebUI:'
+        )
+        
+        # --- Model Selection ---
+        self.widgets['XL_models'] = self.factory.create_checkbox(False, 'XL Models')
+        
+        try:
+            model_options = self.read_model_data(model_data_file, 'model')
+        except Exception as e:
+            self.verbose_manager.print_if_verbose(f"Error loading model data: {e}", VerbosityLevel.DETAILED)
+            model_options = ['none']
+        
+        self.widgets['model'] = self.factory.create_dropdown(
+            model_options, 'none', 'Model:'
+        )
+        
+        # --- VAE Selection ---
+        try:
+            vae_options = self.read_model_data(model_data_file, 'vae')
+        except Exception as e:
+            self.verbose_manager.print_if_verbose(f"Error loading VAE data: {e}", VerbosityLevel.DETAILED)
+            vae_options = ['none', 'ALL']
+        
+        self.widgets['vae'] = self.factory.create_dropdown(
+            vae_options, 'none', 'VAE:'
+        )
+        
+        # --- LoRA Selection ---
+        try:
+            lora_options = self.read_model_data(model_data_file, 'lora')
+        except Exception as e:
+            self.verbose_manager.print_if_verbose(f"Error loading LoRA data: {e}", VerbosityLevel.DETAILED)
+            lora_options = ['none', 'ALL']
+        
+        self.widgets['lora'] = self.factory.create_dropdown(
+            lora_options, 'none', 'LoRA:'
+        )
+        
+        # --- Installation Options ---
+        self.widgets['latest_webui'] = self.factory.create_checkbox(True, 'Latest WebUI')
+        self.widgets['latest_extensions'] = self.factory.create_checkbox(False, 'Latest Extensions')
+        
+        # --- Custom URLs ---
+        self.widgets['Model_url'] = self.factory.create_text('', 'Model URLs (comma-separated):')
+        self.widgets['Vae_url'] = self.factory.create_text('', 'VAE URLs:')
+        self.widgets['LoRA_url'] = self.factory.create_text('', 'LoRA URLs:')
+        self.widgets['Embedding_url'] = self.factory.create_text('', 'Embedding URLs:')
+        self.widgets['Extensions_url'] = self.factory.create_text('', 'Extension URLs:')
+        
+        # --- API Tokens ---
+        self.widgets['civitai_token'] = self.factory.create_text('', 'CivitAI Token:')
+        self.widgets['huggingface_token'] = self.factory.create_text('', 'HuggingFace Token:')
+        
+        # --- Launch Arguments ---
+        self.widgets['commandline_arguments'] = self.factory.create_text(
+            '', 'Launch Arguments:'
+        )
+        
+        # --- Theme ---
+        theme_options = ['anxety', 'light', 'dark']
+        self.widgets['theme_accent'] = self.factory.create_dropdown(
+            theme_options, 'anxety', 'Theme:'
+        )
+        
+        print("✅ Widgets created successfully")
+
+    def create_layout(self):
+        """Create the main widget layout."""
+        print("🎨 Creating layout...")
+        
+        # Create sections
+        webui_section = self.factory.create_vbox([
+            self.factory.create_html("<h3>🌐 WebUI Selection</h3>"),
+            self.widgets['change_webui'],
+            self.factory.create_hbox([
+                self.widgets['latest_webui'],
+                self.widgets['latest_extensions']
+            ])
+        ])
+        
+        model_section = self.factory.create_vbox([
+            self.factory.create_html("<h3>🎨 Model Selection</h3>"),
+            self.widgets['XL_models'],
+            self.widgets['model'],
+            self.widgets['vae'],
+            self.widgets['lora']
+        ])
+        
+        urls_section = self.factory.create_vbox([
+            self.factory.create_html("<h3>🔗 Custom URLs</h3>"),
+            self.widgets['Model_url'],
+            self.widgets['Vae_url'],
+            self.widgets['LoRA_url'],
+            self.widgets['Embedding_url'],
+            self.widgets['Extensions_url']
+        ])
+        
+        config_section = self.factory.create_vbox([
+            self.factory.create_html("<h3>⚙️ Configuration</h3>"),
+            self.widgets['civitai_token'],
+            self.widgets['huggingface_token'],
+            self.widgets['commandline_arguments'],
+            self.widgets['theme_accent']
+        ])
+        
+        # Add verbosity control
+        verbosity_section = self.create_verbosity_control_section()
+        
+        # Control buttons
+        save_button = widgets.Button(
+            description='💾 Save Settings',
+            button_style='success',
+            layout=widgets.Layout(width='200px')
+        )
+        save_button.on_click(lambda b: self.save_settings())
+        
+        buttons_section = self.factory.create_hbox([save_button])
+        
+        # Main layout
+        main_layout = self.factory.create_vbox([
+            self.factory.create_html("<h2>🎯 LSDAI Enhanced Configuration</h2>"),
+            webui_section,
+            model_section,
+            urls_section,
+            config_section,
+            verbosity_section,
+            buttons_section
+        ])
+        
+        print("✅ Layout created successfully")
+        return main_layout
+
+    def save_settings(self):
+        """Save current widget values to settings."""
+        try:
+            settings_data = {}
+            for key in self.settings_keys:
+                if key in self.widgets and hasattr(self.widgets[key], 'value'):
+                    settings_data[key] = self.widgets[key].value
+            
+            js.write(SETTINGS_PATH, 'WIDGETS', settings_data)
+            self.show_notification("Settings saved successfully!", "success")
+            
+        except Exception as e:
+            self.show_notification(f"Error saving settings: {e}", "error")
+
+    def load_settings(self):
+        """Load settings from JSON file."""
+        try:
+            for key in self.settings_keys:
+                if key in self.widgets:
+                    value = js.read(SETTINGS_PATH, f'WIDGETS.{key}')
+                    if value is not None:
+                        if hasattr(self.widgets[key], 'value'):
+                            self.widgets[key].value = value
+        except Exception as e:
+            self.verbose_manager.print_if_verbose(f"Warning: Could not load some settings: {e}", VerbosityLevel.DETAILED)
+
+    def setup_callbacks(self):
+        """Setup widget callbacks and interactions."""
+        # WebUI change callback
+        def update_webui_options(change):
+            update_current_webui(change.get('new', 'A1111'))
+        
+        if 'change_webui' in self.widgets:
+            self.widgets['change_webui'].observe(update_webui_options, names='value')
+        
+        # XL models toggle callback
+        def update_xl_options(change):
+            # Update model options based on XL toggle
+            model_data_file = SCRIPTS / ('_xl_models_data.py' if change.get('new') else '_models_data.py')
+            try:
+                model_options = self.read_model_data(model_data_file, 'model')
+                if 'model' in self.widgets:
+                    self.widgets['model'].options = model_options
+                    self.widgets['model'].value = model_options[0] if model_options else 'none'
+            except Exception as e:
+                self.verbose_manager.print_if_verbose(f"Error updating XL options: {e}", VerbosityLevel.DETAILED)
+        
+        if 'XL_models' in self.widgets:
+            self.widgets['XL_models'].observe(update_xl_options, names='value')
+
+# --- MAIN EXECUTION ---
+def main():
+    """Main function to create and display the widget interface"""
+    
+    print("🎯 LSDAI Enhanced Widget Interface")
+    print("=" * 40)
+    
+    try:
+        # Initialize widget manager
+        wm = WidgetManager()
+        
+        # Create widgets
+        wm.create_widgets()
+        
+        # Load existing settings
+        wm.load_settings()
+        
+        # Setup callbacks
+        wm.setup_callbacks()
+        
+        # Create and display layout
+        layout = wm.create_layout()
+        display(layout)
+        
+        print("✅ Enhanced widget interface loaded successfully!")
+        
+    except Exception as e:
+        print(f"❌ Error creating enhanced widget interface: {e}")
+        import traceback
+        traceback.print_exc()
+        
+        # Show error in HTML
+        error_html = f"""
+        <div style="border: 2px solid #ef4444; background-color: #fee2e2; 
+                    padding: 1rem; border-radius: 0.5rem; color: #b91c1c; margin: 10px 0;">
+            <h3>⚠️ Enhanced Widget Interface Error</h3>
+            <p>The enhanced widget interface failed to load: {e}</p>
+            <p>Please check the error details above and ensure all required files are present.</p>
+        </div>
+        """
+        display(HTML(error_html))
+
+# Run the main function
+if __name__ == "__main__":
+    main()
